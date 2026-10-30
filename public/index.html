@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Listener — Portal</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#16191d; --muted:#667085; --line:#e4e7ec; --accent:#128c7e; --accent-ink:#fff; --danger:#c0362c; --ok:#1a7f4b; --warn:#b26a00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1317; --card:#171c22; --text:#e8ebee; --muted:#8b95a1; --line:#2a323b; --accent:#25b3a2; --accent-ink:#06201c; --danger:#ef6b60; --ok:#4cc38a; --warn:#e0a03a; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--text); font:inherit; }
+  input:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  button { font:inherit; padding:10px 14px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  button.danger { color:var(--danger); border-color:var(--danger); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .status { display:flex; align-items:center; gap:10px; font-weight:600; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); flex:none; }
+  .dot.open { background:var(--ok); } .dot.qr,.dot.pairing,.dot.connecting,.dot.reconnecting { background:var(--warn); } .dot.logged_out,.dot.replaced { background:var(--danger); }
+  .muted { color:var(--muted); font-size:13px; }
+  .qr { display:block; margin:16px auto 4px; width:260px; height:260px; border-radius:8px; background:#fff; padding:8px; }
+  .code { font:700 32px/1.2 ui-monospace,Menlo,Consolas,monospace; letter-spacing:.12em; text-align:center; margin:16px 0 4px; }
+  .err { color:var(--danger); font-size:13px; min-height:18px; margin-top:8px; }
+  ol { padding-left:20px; margin:8px 0 0; color:var(--muted); font-size:13px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WhatsApp Listener</h1>
+  <p class="sub">Link the CX number once. After that it listens to every group it has been added to.</p>
+
+  <!-- Login -->
+  <section id="login" class="card" hidden>
+    <label for="pw">Portal password</label>
+    <input id="pw" type="password" autocomplete="current-password" autofocus>
+    <div class="row"><button id="loginBtn" class="primary">Sign in</button></div>
+    <div class="err" id="loginErr"></div>
+  </section>
+
+  <!-- Dashboard -->
+  <section id="dash" hidden>
+    <div class="card">
+      <div class="status"><span class="dot" id="dot"></span><span id="stateText">…</span></div>
+      <div class="muted" id="meText" style="margin-top:4px"></div>
+      <div class="muted" id="errText" style="margin-top:4px"></div>
+
+      <div id="qrBox" hidden>
+        <img id="qrImg" class="qr" alt="WhatsApp QR code">
+        <ol>
+          <li>Open WhatsApp on the phone that has the CX number</li>
+          <li>Settings → Linked devices → Link a device</li>
+          <li>Scan this code (it refreshes every ~20 seconds)</li>
+        </ol>
+      </div>
+
+      <div id="pairBox" hidden>
+        <div class="code" id="pairCode"></div>
+        <ol>
+          <li>On the phone: Settings → Linked devices → Link a device</li>
+          <li>Tap “Link with phone number instead”</li>
+          <li>Enter the code above</li>
+        </ol>
+      </div>
+
+      <div class="row" id="actions"></div>
+      <div class="err" id="actErr"></div>
+    </div>
+
+    <div class="card" id="phoneCard" hidden>
+      <label for="phone">Or link with a pairing code (no QR scan needed)</label>
+      <input id="phone" inputmode="numeric" placeholder="Phone number with country code, e.g. 919311855419">
+      <div class="row"><button id="pairBtn">Get pairing code</button></div>
+    </div>
+
+    <div class="card muted" id="statsCard" hidden></div>
+    <div class="row" style="justify-content:space-between"><span class="muted">Read-only: this service never sends messages.</span><button id="logoutBtn">Sign out</button></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LABEL = { idle:'Not connected', connecting:'Connecting…', qr:'Waiting for QR scan', pairing:'Waiting for pairing code entry', open:'Connected and listening', reconnecting:'Reconnecting…', logged_out:'Unlinked — link again', replaced:'Number is connected somewhere else' };
+let es = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { method: opts.method || 'GET', headers: opts.body ? { 'content-type':'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && path !== '/portal/login') { showLogin(); throw new Error('login required'); }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+function showLogin() { if (es) es.close(); $('login').hidden = false; $('dash').hidden = true; }
+function showDash() { $('login').hidden = true; $('dash').hidden = false; listen(); }
+
+function listen() {
+  if (es) es.close();
+  es = new EventSource('/portal/events');
+  es.onmessage = (e) => render(JSON.parse(e.data));
+}
+
+function btn(text, cls, fn) { const b = document.createElement('button'); b.textContent = text; if (cls) b.className = cls; b.onclick = async () => { $('actErr').textContent=''; b.disabled = true; try { await fn(); } catch (e) { $('actErr').textContent = e.message; } b.disabled = false; }; return b; }
+
+function render(s) {
+  $('dot').className = 'dot ' + s.state;
+  $('stateText').textContent = LABEL[s.state] || s.state;
+  $('meText').textContent = s.me ? 'Linked as ' + s.me.jid.split(':')[0].split('@')[0] + (s.me.name ? ' (' + s.me.name + ')' : '') : '';
+  $('errText').textContent = s.state !== 'open' && s.last_error ? s.last_error : '';
+  $('qrBox').hidden = !s.qr; if (s.qr) $('qrImg').src = s.qr;
+  $('pairBox').hidden = !s.pairing_code; $('pairCode').textContent = s.pairing_code || '';
+  $('phoneCard').hidden = s.state === 'open';
+
+  const a = $('actions'); a.replaceChildren();
+  if (s.state === 'open') {
+    a.append(btn('Pause listening', '', () => api('/portal/disconnect', { method:'POST' })));
+    a.append(btn('Unlink number', 'danger', async () => { if (confirm('Unlink this number? You will need to scan again.')) await api('/portal/unlink', { method:'POST' }); }));
+  } else if (['idle','logged_out','replaced'].includes(s.state)) {
+    a.append(btn('Link with QR code', 'primary', () => api('/portal/connect', { method:'POST', body:{} })));
+  } else {
+    a.append(btn('Cancel', '', () => api('/portal/disconnect', { method:'POST' })));
+  }
+  loadStats(s.state === 'open');
+}
+
+async function loadStats(open) {
+  const c = $('statsCard'); if (!open) { c.hidden = true; return; }
+  try { const g = await api('/api/groups'); const msgs = g.groups.reduce((n, x) => n + x.message_count, 0);
+    c.hidden = false; c.textContent = g.count + ' groups visible · ' + msgs + ' messages stored'; } catch { c.hidden = true; }
+}
+
+$('loginBtn').onclick = async () => {
+  $('loginErr').textContent = '';
+  try { await api('/portal/login', { method:'POST', body:{ password: $('pw').value } }); $('pw').value=''; showDash(); }
+  catch (e) { $('loginErr').textContent = e.message; }
+};
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('loginBtn').click(); });
+$('pairBtn').onclick = async () => {
+  $('actErr').textContent = '';
+  try { await api('/portal/connect', { method:'POST', body:{ phone: $('phone').value } }); } catch (e) { $('actErr').textContent = e.message; }
+};
+$('logoutBtn').onclick = async () => { await api('/portal/logout', { method:'POST' }).catch(()=>{}); showLogin(); };
+
+api('/portal/me').then(showDash).catch(showLogin);
+</script>
+</body>
+</html>

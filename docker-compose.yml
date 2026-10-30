@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+      POSTGRES_DB: walistener
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on: [db]
+    ports: ["3000:3000"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-change-me}@db:5432/walistener
+      DATA_DIR: /data
+    volumes: [appdata:/data]   # WhatsApp login keys + downloaded media. Back this up.
+
+volumes:
+  pgdata:
+  appdata:
