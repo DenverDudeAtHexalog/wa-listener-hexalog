@@ -10,16 +10,16 @@
   main { max-width:560px; margin:-28px auto 0; padding:0 16px 64px; position:relative; }
   .status { display:flex; align-items:center; gap:10px; font-weight:700; font-size:17px; }
   .dot { width:12px; height:12px; border-radius:50%; background:var(--muted); flex:none; }
-  .dot.open { background:var(--ok); box-shadow:0 0 0 4px rgba(22,138,82,.18); } .dot.qr,.dot.pairing,.dot.connecting,.dot.reconnecting { background:var(--warn); } .dot.logged_out,.dot.replaced { background:var(--danger); }
+  .dot.s-open { background:var(--ok); box-shadow:0 0 0 4px rgba(22,138,82,.18); } .dot.s-qr,.dot.s-pairing,.dot.s-connecting,.dot.s-reconnecting { background:var(--warn); } .dot.s-logged_out,.dot.s-replaced { background:var(--danger); }
   .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
-  .qr { display:block; margin:16px auto 4px; width:260px; height:260px; border-radius:16px; background:#fff; padding:10px; border:1.5px solid var(--line); }
+  .qrimg { display:block; margin:16px auto 4px; width:260px; height:260px; border-radius:16px; background:#fff; padding:10px; border:1.5px solid var(--line); }
   .code { font:800 32px/1.2 var(--mono); letter-spacing:.12em; text-align:center; margin:16px 0 4px; color:var(--accent); }
   .err { color:var(--danger); font-size:13px; min-height:18px; margin-top:8px; }
   ol { padding-left:20px; margin:8px 0 0; color:var(--muted); font-size:13px; }
 </style>
 </head>
 <body>
-<header class="bar"><div class="bar-in"><a class="logo" href="/"><i></i>HEXALOG</a>
+<header class="bar"><div class="bar-in"><a class="logo" href="/"><img src="/hexalog-logo.webp" alt="Hexalog" onerror="this.remove()"><span class="wm">HEXALOG</span></a>
   <nav><a class="on" href="/">Portal</a><a href="/docs">API docs</a></nav></div></header>
 <section class="hero"><div class="hero-in">
   <span class="pill">CX WhatsApp listener</span>
@@ -44,7 +44,7 @@
       <div class="muted" id="errText" style="margin-top:4px"></div>
 
       <div id="qrBox" hidden>
-        <img id="qrImg" class="qr" alt="WhatsApp QR code">
+        <img id="qrImg" class="qrimg" alt="WhatsApp QR code">
         <ol>
           <li>Open WhatsApp on the phone that has the CX number</li>
           <li>Settings → Linked devices → Link a device</li>
@@ -101,7 +101,7 @@ function listen() {
 function btn(text, cls, fn) { const b = document.createElement('button'); b.textContent = text; if (cls) b.className = cls; b.onclick = async () => { $('actErr').textContent=''; b.disabled = true; try { await fn(); } catch (e) { $('actErr').textContent = e.message; } b.disabled = false; }; return b; }
 
 function render(s) {
-  $('dot').className = 'dot ' + s.state;
+  $('dot').className = 'dot s-' + s.state;
   $('stateText').textContent = LABEL[s.state] || s.state;
   $('meText').textContent = s.me ? 'Linked as ' + s.me.jid.split(':')[0].split('@')[0] + (s.me.name ? ' (' + s.me.name + ')' : '') : '';
   $('errText').textContent = s.state !== 'open' && s.last_error ? s.last_error : '';
