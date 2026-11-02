@@ -33,6 +33,23 @@ const toNum = (v) => (v && typeof v === 'object' && 'toNumber' in v ? v.toNumber
 
 function stripNull(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
 
+
+function senderOf(msg, key, chatJid) {
+  const p = key.participantAlt || key.participant || msg.participantAlt || msg.participant;
+  if (p) return p;
+  if (key.fromMe) return 'me';
+  return isJidGroup(chatJid) ? null : chatJid; // in a 1:1 chat the chat itself is the sender
+}
+
+/** Resolve a hidden LID sender to a phone number using the stored group participant list. */
+async function lookupLidPhone(chatJid, lid) {
+  const { rows } = await q(
+    `SELECT p->>'jid' AS jid FROM wa_groups g, jsonb_array_elements(g.participants) p
+     WHERE g.jid = $1 AND p->>'lid' = $2 LIMIT 1`, [chatJid, lid]);
+  const jid = rows[0]?.jid;
+  return jid && jid.endsWith('@s.whatsapp.net') ? jid : null;
+}
+
 /** Turn a raw Baileys message into our row shape (no media download yet). */
 export function parseMessage(msg) {
   const key = msg.key || {};
@@ -51,7 +68,8 @@ export function parseMessage(msg) {
   const base = {
     id: key.id,
     chat_jid: chatJid,
-    sender_jid: key.participantAlt || key.participant || (key.fromMe ? 'me' : chatJid),
+    // Live messages carry the sender in key.participant(Alt); history-sync messages put it on msg.participant.
+    sender_jid: senderOf(msg, key, chatJid),
     sender_name: msg.pushName || null,
     from_me: !!key.fromMe,
     ts: new Date(toNum(msg.messageTimestamp) * 1000 || Date.now()),
@@ -215,7 +233,13 @@ export async function ingestMessage(sock, msg, { fromHistory = false } = {}) {
 
   if (!parsed.id) return;
 
+  if (!parsed.sender_phone && parsed.sender_jid?.endsWith('@lid')) {
+    const pn = await lookupLidPhone(chat, parsed.sender_jid);
+    if (pn) { parsed.sender_phone = phoneOf(pn); }
+  }
+
   let media = { path: null, size: parsed.media?.size ?? null, error: null };
+  if (parsed.media && fromHistory) media.error = 'not downloaded (sent before the number was linked)';
   if (parsed.media && !fromHistory) {
     const saved = await saveMedia(sock, msg, parsed);
     media = { path: saved.path || null, size: saved.size ?? parsed.media.size, error: saved.error || null };
