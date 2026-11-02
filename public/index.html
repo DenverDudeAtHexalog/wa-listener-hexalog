@@ -81,7 +81,7 @@
     </div>
 
     <div class="card muted" id="statsCard" hidden></div>
-    <div class="row" style="justify-content:space-between"><span class="muted">Read-only: this service never sends messages.</span><button id="logoutBtn">Sign out</button></div>
+    <div class="row" style="justify-content:space-between"><span class="muted" id="modeText"></span><button id="logoutBtn">Sign out</button></div>
   </section>
 </main>
 
@@ -117,6 +117,7 @@ function render(s) {
   $('qrBox').hidden = !s.qr; if (s.qr) $('qrImg').src = s.qr;
   $('pairBox').hidden = !s.pairing_code; $('pairCode').textContent = s.pairing_code || '';
   $('phoneCard').hidden = s.state === 'open';
+  $('modeText').textContent = s.writes_enabled ? 'Sending and group management are enabled for the admin API key.' : 'Listen-only: sending is disabled.';
 
   const a = $('actions'); a.replaceChildren();
   if (s.state === 'open') {

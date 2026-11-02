@@ -8,6 +8,7 @@ import { migrate, q, pool } from './db.js';
 import { bus } from './bus.js';
 import { session } from './session.js';
 import { publicRow, fetchMedia } from './ingest.js';
+import { router as writesRouter, BIG_BODY_ROUTE } from './writes.js';
 import { startWebhookDispatcher, ensureDefaultWebhook, WEBHOOK_EVENTS } from './webhooks.js';
 import {
   checkPassword, makeCookie, clearCookie, requirePortal, requireApi, loginAllowed, recordLogin,
@@ -19,7 +20,9 @@ export function buildApp() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
-  app.use(express.json({ limit: '1mb' }));
+  // Small body limit everywhere; the few routes that upload files are parsed (after auth) in writes.js.
+  const smallJson = express.json({ limit: '1mb' });
+  app.use((req, res, next) => (BIG_BODY_ROUTE.test(req.path) ? next() : smallJson(req, res, next)));
 
   // ---- Health (no auth, no secrets) ----------------------------------------------------
   app.get('/health', async (_req, res) => {
@@ -205,9 +208,12 @@ export function buildApp() {
     res.json({ deliveries: rows });
   });
 
+  app.use('/api', writesRouter); // write actions (admin key); anything it does not handle falls through to the read API
   app.use('/api', api);
 
   app.use((err, _req, res, _next) => {
+    const status = err.status || err.statusCode;
+    if (status >= 400 && status < 500) return res.status(status).json({ error: err.type === 'entity.too.large' ? 'request body too large' : 'bad request' });
     console.error('[http]', err);
     res.status(500).json({ error: 'internal error' });
   });

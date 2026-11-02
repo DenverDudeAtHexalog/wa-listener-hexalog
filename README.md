@@ -1,11 +1,11 @@
 # WhatsApp Listener
 
-Headless, read-only WhatsApp group listener built on Baileys. One number is linked once through a login
-portal; it then records every message in the groups it has been added to (text, images, video, documents,
-voice notes, replies, edits, deletes, reactions) and exposes them through a REST API, signed webhooks and a
-live event stream.
+WhatsApp group listener built on Baileys. One number is linked once through a login portal; it then records every
+message in the groups it has been added to (text, images, video, documents, voice notes, replies, edits, deletes,
+reactions) and exposes them through a REST API, signed webhooks and a live event stream.
 
-It never sends messages and never sends read receipts.
+By default it is listen-only. Set `ADMIN_API_KEY` to also let your systems send messages and manage groups
+through the API (see "Writing" below).
 
 ## Run it
 
@@ -65,6 +65,44 @@ Send `x-api-key: <API_KEY>` (or `Authorization: Bearer <API_KEY>`, or `?api_key=
 Message filters: `limit` (max 500), `after_uid` (everything newer than a cursor, oldest first; use the returned
 `next_after_uid`), `before_uid`, `since`, `until` (ISO times), `type` (comma list: text, image, video, audio,
 document, sticker, location, contact, poll), `sender` (phone number), `search` (text).
+
+### Writing (sending and group management)
+
+Everything that changes something on WhatsApp needs the **admin key** in the `x-api-key` header (never in a URL).
+It is disabled until `ADMIN_API_KEY` is set (it must differ from `API_KEY`). The normal `API_KEY` can only read.
+Phone numbers are digits with country code (`919800000001`); a full JID such as `1203...@g.us` also works.
+
+| Endpoint | Does |
+|---|---|
+| `POST /api/send/text` `{to, text, mentions?, reply_to_uid?}` | Send text. Put `@919800000002` in the text and the number in `mentions` to tag someone |
+| `POST /api/send/media` `{to, type, data_base64, caption?, filename?, mimetype?, voice_note?, reply_to_uid?}` | `type` = image, video, audio, document, sticker. Voice notes: `type:"audio", voice_note:true` with an ogg/opus file |
+| `POST /api/send/location` `{to, latitude, longitude, name?, address?}` | Location |
+| `POST /api/send/contact` `{to, contacts:[{name, phone}]}` | Contact card |
+| `POST /api/send/poll` `{to, question, options, multi?}` | Poll |
+| `POST /api/messages/:uid/react` `{emoji}` | React (empty emoji removes it) |
+| `POST /api/messages/:uid/edit` `{text}` / `.../delete` / `.../read` | Edit or delete your own message; mark read |
+| `POST /api/presence` `{to, state}` | Typing indicator (`composing`, `recording`, `paused`) |
+| `POST /api/lookup` `{numbers}` | Which numbers are on WhatsApp |
+| `POST /api/groups` `{subject, participants}` | Create a group |
+| `POST /api/groups/:jid/participants` `{action, participants, invite_fallback?, invite_message?}` | `add`, `remove`, `promote` (make admin), `demote`. Per-person results; `invite_fallback` DMs the invite link to people whose privacy settings block adding |
+| `PUT /api/groups/:jid/subject` / `description` | Rename, set description |
+| `PUT /api/groups/:jid/settings` `{announce?, locked?, member_add_mode?, join_approval?, ephemeral_seconds?}` | Only admins can send, only admins can edit info, who can add members (`admin`/`all`), approval to join, disappearing messages |
+| `PUT /api/groups/:jid/picture` `{data_base64}` / `DELETE` | Group icon |
+| `GET /api/groups/:jid/invite`, `POST .../invite/revoke` | Invite link; reset it |
+| `POST /api/groups/join` `{invite}` | Join a group from a link |
+| `POST /api/groups/:jid/leave`, `/refresh` | Leave; re-read members |
+| `GET/POST /api/groups/:jid/join-requests` | List requests; `{action:"approve"|"reject", participants}` |
+| `PUT /api/profile/name`, `/status`, `/picture`, `DELETE /api/profile/picture` | The linked number's own profile |
+| `GET /api/actions` | Audit log of every action done through the API |
+
+Messages the number sends are stored like any other (`from_me: true`). Group actions only work where the linked
+number is an admin; otherwise the API answers `403`. Adding people needs them to be on WhatsApp (checked first) and to
+allow being added by non-contacts, otherwise use `invite_fallback`.
+
+**Safety.** Automated sending and group management is the fastest way to get a WhatsApp number banned, so every action goes
+through one queue with random pauses (1.5 to 4 s between messages, 5 to 10 s between group actions) and limits that return `429`
+when reached: 120 messages per hour, 10 new groups per day and 100 members added or removed per day (all configurable). Use an
+established number, only message people who expect it, and keep bulk work small.
 
 ### Message object
 

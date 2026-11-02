@@ -22,6 +22,16 @@ export const config = {
   ingestHistory: env.INGEST_HISTORY !== 'false',
   autoConnect: env.AUTO_CONNECT !== 'false',
   logLevel: env.LOG_LEVEL || 'warn',
+  // Writing (sending messages, managing groups). Disabled unless ADMIN_API_KEY is set.
+  adminApiKey: env.ADMIN_API_KEY || '',
+  msgGapMinMs: int(env.MSG_GAP_MIN_MS, 1500),      // pause between outgoing messages (random between min and max)
+  msgGapMaxMs: int(env.MSG_GAP_MAX_MS, 4000),
+  groupGapMinMs: int(env.GROUP_GAP_MIN_MS, 5000),  // pause between group-management actions
+  groupGapMaxMs: int(env.GROUP_GAP_MAX_MS, 10000),
+  maxSendsPerHour: int(env.MAX_SENDS_PER_HOUR, 120),
+  maxGroupCreatesPerDay: int(env.MAX_GROUP_CREATES_PER_DAY, 10),
+  maxMemberChangesPerDay: int(env.MAX_MEMBER_CHANGES_PER_DAY, 100), // members added or removed
+  writeQueueMax: int(env.WRITE_QUEUE_MAX, 50),
   // Webhooks
   webhookMaxAttempts: int(env.WEBHOOK_MAX_ATTEMPTS, 8),
   defaultWebhookUrl: env.WEBHOOK_URL || '',
@@ -33,6 +43,7 @@ export function assertConfig() {
   if (!config.apiKey) problems.push('API_KEY is required');
   if (!config.portalPassword) problems.push('PORTAL_PASSWORD is required');
   if (!config.sessionSecret) problems.push('SESSION_SECRET (or API_KEY) is required');
+  if (config.adminApiKey && config.adminApiKey === config.apiKey) problems.push('ADMIN_API_KEY must differ from API_KEY');
   if (problems.length) {
     throw new Error('Invalid configuration: ' + problems.join('; '));
   }

@@ -45,6 +45,7 @@ class WhatsAppSession {
       me: this.me,
       last_error: this.lastError,
       linked: this.state === 'open',
+      writes_enabled: !!config.adminApiKey,
     };
   }
 

@@ -82,6 +82,19 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 );
 CREATE INDEX IF NOT EXISTS deliveries_due_idx ON webhook_deliveries (status, next_attempt);
 
+CREATE TABLE IF NOT EXISTS actions_log (
+  id      bigserial PRIMARY KEY,
+  ts      timestamptz NOT NULL DEFAULT now(),
+  kind    text NOT NULL,
+  action  text NOT NULL,
+  target  text,
+  summary jsonb,
+  ok      boolean NOT NULL,
+  error   text,
+  cost    integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS actions_log_kind_ts_idx ON actions_log (kind, ts DESC);
+
 CREATE TABLE IF NOT EXISTS connection_log (
   id     bigserial PRIMARY KEY,
   ts     timestamptz NOT NULL DEFAULT now(),

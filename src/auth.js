@@ -36,10 +36,30 @@ export function hasPortalSession(req) {
   return safeEq(sig, hmac(exp));
 }
 
-export function hasApiKey(req) {
-  const h = req.headers['x-api-key'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.api_key;
-  return !!h && safeEq(h, config.apiKey);
+function presentedKeys(req) {
+  const header = req.headers['x-api-key'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || '';
+  return { header, query: req.query.api_key || '' };
 }
+
+/** Read access: the API key (header or ?api_key=) or the admin key (header only). */
+export function hasApiKey(req) {
+  const { header, query } = presentedKeys(req);
+  if (header && (safeEq(header, config.apiKey) || (config.adminApiKey && safeEq(header, config.adminApiKey)))) return true;
+  return !!query && safeEq(query, config.apiKey);
+}
+
+/** Write access: the admin key, sent in a header only (never in a URL, where it would end up in logs). */
+export function hasAdminKey(req) {
+  const { header } = presentedKeys(req);
+  return !!config.adminApiKey && !!header && safeEq(header, config.adminApiKey);
+}
+
+export const requireAdmin = (req, res, next) => {
+  if (!config.adminApiKey) return res.status(403).json({ error: 'writing is disabled: set ADMIN_API_KEY on the server' });
+  if (hasAdminKey(req)) return next();
+  const { header } = presentedKeys(req);
+  return res.status(header ? 403 : 401).json({ error: header ? 'this action needs the admin API key' : 'missing admin API key' });
+};
 
 export const requirePortal = (req, res, next) =>
   hasPortalSession(req) ? next() : res.status(401).json({ error: 'login required' });
