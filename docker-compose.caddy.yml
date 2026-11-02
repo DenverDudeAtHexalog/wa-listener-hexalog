@@ -1,0 +1,15 @@
+# Adds automatic HTTPS in front of the app. Used when DOMAIN is set in .env (deploy/setup.sh does this).
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    command: ["caddy", "reverse-proxy", "--from", "${DOMAIN}", "--to", "app:3000"]
+    volumes: [caddy_data:/data, caddy_config:/config]
+
+volumes:
+  caddy_data:
+  caddy_config:

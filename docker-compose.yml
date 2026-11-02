@@ -11,7 +11,7 @@ services:
     build: .
     restart: unless-stopped
     depends_on: [db]
-    ports: ["3000:3000"]
+    ports: ["${BIND:-127.0.0.1}:3000:3000"]   # localhost only by default; set BIND=0.0.0.0 to expose
     env_file: .env
     environment:
       DATABASE_URL: postgres://postgres:${DB_PASSWORD:-change-me}@db:5432/walistener

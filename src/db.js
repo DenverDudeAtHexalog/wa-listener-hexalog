@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS messages (
   UNIQUE (chat_jid, id)
 );
 CREATE INDEX IF NOT EXISTS messages_chat_ts_idx ON messages (chat_jid, ts DESC, uid DESC);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_ref jsonb;
 CREATE INDEX IF NOT EXISTS messages_ts_idx ON messages (ts DESC);
 CREATE INDEX IF NOT EXISTS messages_type_idx ON messages (type);
 

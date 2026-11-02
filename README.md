@@ -20,6 +20,21 @@ volume and the service reconnects by itself after restarts.
 
 Without Docker: Node 20+, a Postgres database, `npm install`, set the env vars in `.env.example`, `npm start`.
 
+### Deploy on an AWS EC2 box
+
+Works on Ubuntu/Debian or Amazon Linux 2023, x86 or ARM; 2 GB RAM is comfortable (1 GB works, a swap file is added).
+Get the code onto the machine (`git clone` or copy the zip), then from the repo folder:
+
+```bash
+sudo bash deploy/setup.sh                              # private: reach the portal through an SSH tunnel
+sudo DOMAIN=listener.example.com bash deploy/setup.sh  # public HTTPS via Caddy (point a DNS A record at the server first)
+```
+
+It installs Docker, creates `.env` with random secrets (printed once), builds and starts everything, and waits for
+`/health`. Security group: open 22 from your IP only; add 80 and 443 only if you use a domain. Never expose port 3000
+to the whole internet over plain HTTP. Data lives in Docker volumes (`appdata` = login keys + media, `pgdata`).
+Redeploy with `sudo bash deploy/update.sh`; schedule `deploy/backup.sh` in cron for nightly backups.
+
 ### Deploy on Render
 
 `render.yaml` defines the web service (Docker, Starter plan, 5 GB persistent disk at `/data`) and a Postgres
@@ -42,7 +57,7 @@ Send `x-api-key: <API_KEY>` (or `Authorization: Bearer <API_KEY>`, or `?api_key=
 | `GET /api/groups/:jid/messages` | Messages of one group (URL-encode the jid) |
 | `GET /api/messages` | Messages across all groups |
 | `GET /api/messages/:uid` | One message, including reactions |
-| `GET /api/media/:uid` | The stored file (image, video, document, voice note) |
+| `GET /api/media/:uid` | The file (image, video, document, voice note). Fetched from WhatsApp when opened, see "Files" below |
 | `PUT /api/messages/:uid/transcript` | Attach a transcript from your speech-to-text worker. Body: `{"transcript":"..."}` |
 | `GET /api/stream` | Server-Sent Events: `message.created`, `message.updated`, `message.deleted`, `reaction`, `group.updated`, `connection` |
 | `GET/POST/DELETE /api/webhooks` | Manage webhooks. `GET /api/webhooks/:id/deliveries` shows delivery status |
@@ -69,6 +84,18 @@ document, sticker, location, contact, poll), `sender` (phone number), `search` (
 `POST /api/webhooks {"url":"https://you/hook","events":["message.created"]}` (empty `events` = all). The response
 shows the signing secret once. Each delivery is a JSON body with header `X-Walistener-Signature: sha256=<HMAC-SHA256
 of the raw body using the secret>`. Failed deliveries retry with backoff (10s up to 1h, 8 attempts).
+
+### Files (photos, documents, voice notes)
+
+By default (`MEDIA_MODE=ondemand`) no files are saved on the server. For each file the service stores only the small
+amount of information needed to download it from WhatsApp, and `GET /api/media/:uid` fetches it from WhatsApp at that
+moment. This keeps the disk small, but WhatsApp does not keep files forever: once a file has expired there, the
+request returns `410 this file is no longer available from WhatsApp` and it cannot be recovered. A file always works
+right after it arrives, so anything that must be kept (for example a speech-to-text worker, or an archive job) should
+fetch it when the `message.created` webhook fires. Requests return `503` while the number is disconnected.
+
+Set `MEDIA_MODE=store` to save every file on the server's disk as well (files then survive WhatsApp expiring them, but
+the disk fills over time). Files saved earlier in `store` mode keep being served from disk.
 
 ### Voice notes
 

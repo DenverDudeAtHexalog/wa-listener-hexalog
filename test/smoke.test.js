@@ -8,6 +8,7 @@ import path from 'node:path';
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/walistener_test';
 process.env.API_KEY = 'test-key';
 process.env.PORTAL_PASSWORD = 'pw';
+process.env.MEDIA_MODE = 'store'; // first half of the test covers store mode; on-demand is tested below
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wal-'));
 process.env.PUBLIC_BASE_URL = 'http://localhost';
 
@@ -113,10 +114,61 @@ assert.deepEqual(first.messages.map((m) => m.id), ['A1', 'D1']);
 assert.equal((await get('/api/messages?search=customs')).count, 1);
 assert.equal((await get('/api/groups')).groups[0].message_count, 5);
 
+// direct chats: off by default (asserted above), and when enabled a LID chat is merged onto the real number
+const { config } = await import('../src/config.js');
+config.includeDirectChats = true;
+await ingestMessage(fakeSock, { key: { remoteJid: '555@lid', remoteJidAlt: '919800000009@s.whatsapp.net', id: 'DM2', fromMe: false }, pushName: 'Customer', messageTimestamp: now(), message: { conversation: 'hello from a DM' } });
+await ingestMessage(fakeSock, { key: { remoteJid: '919800000009@s.whatsapp.net', id: 'DM3', fromMe: false }, pushName: 'Customer', messageTimestamp: now(), message: { conversation: 'second DM' } });
+config.includeDirectChats = false;
+const dm = await get('/api/messages?search=DM');
+const dms = dm.messages.filter((m) => m.chat_jid === '919800000009@s.whatsapp.net');
+assert.equal(dms.length, 2, 'both DMs land in one chat keyed by the phone number');
+assert.equal(dms[0].sender_phone, '919800000009');
+
+// history-sync style message: sender only on msg.participant, no pushName
+await ingestMessage(fakeSock, { key: { remoteJid: GROUP, id: 'HS1', fromMe: false }, participant: '919800000001@s.whatsapp.net', messageTimestamp: now(), message: { conversation: 'hist sender' } }, { fromHistory: true });
+// sender only as a LID -> phone resolved from stored group participants
+await ingestMessage(fakeSock, { key: { remoteJid: GROUP, id: 'HS2', fromMe: false, participant: '123@lid' }, messageTimestamp: now(), message: { imageMessage: { mimetype: 'image/jpeg', fileLength: 5 } } }, { fromHistory: true });
+const hs = (await get(`/api/groups/${encodeURIComponent(GROUP)}/messages?search=hist%20sender`)).messages[0];
+assert.equal(hs.sender_jid, '919800000001@s.whatsapp.net'); assert.equal(hs.sender_phone, '919800000001');
+const hs2 = (await get(`/api/groups/${encodeURIComponent(GROUP)}/messages?type=image`)).messages.find((m) => m.id === 'HS2');
+assert.equal(hs2.sender_phone, '919800000001', 'LID resolved via group participants');
+assert.ok(hs2.media.url && hs2.media.stored === false, 'history media is fetchable on demand, not stored');
+
+// ---- on-demand mode: nothing saved, file fetched from WhatsApp when opened -------------------------
+config.mediaMode = 'ondemand';
+const { session } = await import('../src/session.js');
+await ingestMessage(fakeSock, mk('OD1', { documentMessage: { mimetype: 'application/pdf', fileName: 'order.pdf', fileLength: 8, directPath: '/v/t62/abc',
+  mediaKey: Buffer.from('k'.repeat(32)), fileSha256: Buffer.from('s'.repeat(32)), fileEncSha256: Buffer.from('e'.repeat(32)) } }));
+const od = (await get(`/api/groups/${encodeURIComponent(GROUP)}/messages?type=document`)).messages.find((m) => m.id === 'OD1');
+assert.ok(od.media.url && od.media.stored === false, 'on-demand: url present, nothing stored');
+const dbrow = (await q('SELECT media_path, media_ref FROM messages WHERE uid=$1', [od.uid])).rows[0];
+assert.equal(dbrow.media_path, null, 'no file written to disk');
+assert.equal(dbrow.media_ref.fields.directPath, '/v/t62/abc');
+
+// not connected -> 503
+session.sock = null; session.state = 'idle';
+assert.equal((await fetch(`${base}/api/media/${od.uid}`, { headers: H })).status, 503);
+// connected -> downloaded from WhatsApp with the stored key
+let seen;
+_setDownloader(async (m) => { seen = m; return Buffer.from('PDFBYTES'); });
+session.sock = fakeSock; session.state = 'open';
+const ok = await fetch(`${base}/api/media/${od.uid}`, { headers: H });
+assert.equal(ok.status, 200); assert.equal(ok.headers.get('content-type'), 'application/pdf');
+assert.equal(Buffer.from(await ok.arrayBuffer()).toString(), 'PDFBYTES');
+assert.equal(seen.message.documentMessage.mediaKey.length, 32, 'key rebuilt as bytes');
+assert.equal(seen.key.id, 'OD1');
+// expired on WhatsApp -> 410 with a clear message
+_setDownloader(async () => { throw new Error('Request failed with status code 410'); });
+const gone = await fetch(`${base}/api/media/${od.uid}`, { headers: H });
+assert.equal(gone.status, 410); assert.match((await gone.json()).error, /no longer available/);
+session.sock = null; session.state = 'idle';
+_setDownloader(async () => Buffer.from('OggS-fake-audio-bytes'));
+
 // history messages are stored but do not fire webhooks
 const before = received.length;
 await ingestMessage(fakeSock, mk('H1', { conversation: 'old message' }), { fromHistory: true });
-assert.equal((await get(`/api/groups/${encodeURIComponent(GROUP)}/messages?search=old`)).count, 1);
+assert.equal((await get(`/api/groups/${encodeURIComponent(GROUP)}/messages?search=old%20message`)).count, 1);
 
 // webhooks delivered, signed, filtered by event
 await new Promise((r) => setTimeout(r, 4500));

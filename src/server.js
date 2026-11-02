@@ -7,7 +7,7 @@ import { config, assertConfig } from './config.js';
 import { migrate, q, pool } from './db.js';
 import { bus } from './bus.js';
 import { session } from './session.js';
-import { publicRow } from './ingest.js';
+import { publicRow, fetchMedia } from './ingest.js';
 import { startWebhookDispatcher, ensureDefaultWebhook, WEBHOOK_EVENTS } from './webhooks.js';
 import {
   checkPassword, makeCookie, clearCookie, requirePortal, requireApi, loginAllowed, recordLogin,
@@ -36,7 +36,7 @@ export function buildApp() {
     const ok = checkPassword(req.body?.password);
     recordLogin(ip, ok);
     if (!ok) return res.status(401).json({ error: 'wrong password' });
-    res.setHeader('Set-Cookie', makeCookie());
+    res.setHeader('Set-Cookie', makeCookie(req.secure));
     res.json({ ok: true });
   });
   app.post('/portal/logout', (_req, res) => { res.setHeader('Set-Cookie', clearCookie()); res.json({ ok: true }); });
@@ -133,15 +133,36 @@ export function buildApp() {
   });
 
   api.get('/media/:uid', async (req, res) => {
-    const { rows } = await q('SELECT media_path, media_mime, media_filename FROM messages WHERE uid=$1', [req.params.uid]);
+    const { rows } = await q(
+      `SELECT chat_jid, id, media_path, media_mime, media_filename, media_size, media_ref FROM messages WHERE uid=$1`, [req.params.uid]);
     const m = rows[0];
-    if (!m?.media_path) return res.status(404).json({ error: 'no media for this message' });
-    const abs = path.resolve(config.dataDir, m.media_path);
-    if (!abs.startsWith(path.resolve(config.dataDir) + path.sep)) return res.status(400).end();
-    if (!fs.existsSync(abs)) return res.status(410).json({ error: 'media file missing on disk' });
-    if (m.media_mime) res.type(m.media_mime.split(';')[0]);
-    if (m.media_filename) res.setHeader('Content-Disposition', `inline; filename="${m.media_filename.replace(/"/g, '')}"`);
-    res.sendFile(abs);
+    if (!m || (!m.media_path && !m.media_ref)) return res.status(404).json({ error: 'no media for this message' });
+    const headers = () => {
+      if (m.media_mime) res.type(m.media_mime.split(';')[0]);
+      if (m.media_filename) res.setHeader('Content-Disposition', `inline; filename="${m.media_filename.replace(/"/g, '')}"`);
+    };
+
+    // 1) saved on this server (MEDIA_MODE=store)
+    if (m.media_path) {
+      const abs = path.resolve(config.dataDir, m.media_path);
+      if (abs.startsWith(path.resolve(config.dataDir) + path.sep) && fs.existsSync(abs)) { headers(); return res.sendFile(abs); }
+      if (!m.media_ref) return res.status(410).json({ error: 'media file missing on disk' });
+    }
+
+    // 2) fetch from WhatsApp now
+    if (m.media_size && Number(m.media_size) > config.maxMediaMb * 1024 * 1024) {
+      return res.status(413).json({ error: `file is larger than MAX_MEDIA_MB (${config.maxMediaMb})` });
+    }
+    if (!session.sock || session.state !== 'open') {
+      return res.status(503).json({ error: 'WhatsApp is not connected right now; try again in a moment' });
+    }
+    try {
+      const buf = await fetchMedia(session.sock, m);
+      headers();
+      res.send(buf);
+    } catch (e) {
+      res.status(410).json({ error: 'this file is no longer available from WhatsApp', detail: String(e.message || e).slice(0, 200) });
+    }
   });
 
   // Live stream of events (Server-Sent Events). EventSource can't set headers, so ?api_key= is accepted.

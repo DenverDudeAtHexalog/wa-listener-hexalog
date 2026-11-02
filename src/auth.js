@@ -13,9 +13,9 @@ const TTL_MS = 12 * 60 * 60 * 1000;
 
 export function checkPassword(p) { return safeEq(p || '', config.portalPassword); }
 
-export function makeCookie() {
+export function makeCookie(secure = false) {
   const exp = String(Date.now() + TTL_MS);
-  return `${COOKIE}=${exp}.${hmac(exp)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${TTL_MS / 1000}`;
+  return `${COOKIE}=${exp}.${hmac(exp)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${TTL_MS / 1000}${secure ? '; Secure' : ''}`;
 }
 export const clearCookie = () => `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
 

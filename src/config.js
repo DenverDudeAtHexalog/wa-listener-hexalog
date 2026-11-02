@@ -14,6 +14,9 @@ export const config = {
   sessionSecret: env.SESSION_SECRET || env.API_KEY || '',
   publicBaseUrl: (env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   // Listener behaviour
+  // 'ondemand' (default): store only the info needed to re-download a file and fetch it from WhatsApp when opened.
+  // 'store': also save every file on this server's disk (needs disk space; files survive WhatsApp expiring them).
+  mediaMode: env.MEDIA_MODE === 'store' ? 'store' : 'ondemand',
   maxMediaMb: int(env.MAX_MEDIA_MB, 50),
   includeDirectChats: env.INCLUDE_DIRECT_CHATS === 'true',
   ingestHistory: env.INGEST_HISTORY !== 'false',
