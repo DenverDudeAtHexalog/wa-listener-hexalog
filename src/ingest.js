@@ -34,6 +34,13 @@ const toNum = (v) => (v && typeof v === 'object' && 'toNumber' in v ? v.toNumber
 function stripNull(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
 
 
+/** The chat a message belongs to. In 1:1 chats WhatsApp may hide the number behind a LID; use the real number when given. */
+export function chatOf(key) {
+  const jid = key?.remoteJid;
+  if (!jid || isJidGroup(jid)) return jid;
+  return key.remoteJidAlt || jid;
+}
+
 function senderOf(msg, key, chatJid) {
   const p = key.participantAlt || key.participant || msg.participantAlt || msg.participant;
   if (p) return p;
@@ -53,7 +60,7 @@ async function lookupLidPhone(chatJid, lid) {
 /** Turn a raw Baileys message into our row shape (no media download yet). */
 export function parseMessage(msg) {
   const key = msg.key || {};
-  const chatJid = key.remoteJid;
+  const chatJid = chatOf(key);
   if (!chatJid || !msg.message) return null;
 
   const inner = extractMessageContent(msg.message) || msg.message;
@@ -189,7 +196,7 @@ export async function fetchMessageByUid(uid) {
  * and skip media download (WhatsApp usually has expired the media by then).
  */
 export async function ingestMessage(sock, msg, { fromHistory = false } = {}) {
-  const chat = msg.key?.remoteJid;
+  const chat = chatOf(msg.key);
   if (!chat || chat === 'status@broadcast' || chat.endsWith('@broadcast') || chat.endsWith('@newsletter')) return;
   if (!isJidGroup(chat) && !config.includeDirectChats) return;
 
