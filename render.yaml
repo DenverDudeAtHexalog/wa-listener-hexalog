@@ -1,0 +1,47 @@
+# Render Blueprint: one web service (portal + API + WhatsApp listener) and one Postgres database.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+#
+# Notes
+# - The WhatsApp login keys and downloaded media live on the persistent disk at /data.
+#   Disks need a paid plan, and a disk-backed service can only run ONE instance
+#   (a second copy of the same number would fight for the connection).
+# - Free web services spin down after 15 minutes and have no disk, so they cannot hold a WhatsApp session.
+# - Deploys of disk-backed services have a short downtime (old instance stops first).
+
+databases:
+  - name: wa-listener-db
+    databaseName: walistener
+    user: walistener
+    plan: basic-256mb
+    region: singapore
+    ipAllowList: []          # internal access only (the web service connects over Render's private network)
+
+services:
+  - type: web
+    name: wa-listener
+    runtime: docker
+    plan: starter
+    region: singapore
+    numInstances: 1
+    healthCheckPath: /health
+    disk:
+      name: wa-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: wa-listener-db
+          property: connectionString
+      - key: DATA_DIR
+        value: /data
+      - key: API_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PORTAL_PASSWORD
+        sync: false          # Render asks for this when you create the Blueprint
+      - key: PUBLIC_BASE_URL
+        sync: false          # e.g. https://wa-listener.onrender.com (set after first deploy if unsure)
+      - key: LOG_LEVEL
+        value: warn

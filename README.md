@@ -20,6 +20,14 @@ volume and the service reconnects by itself after restarts.
 
 Without Docker: Node 20+, a Postgres database, `npm install`, set the env vars in `.env.example`, `npm start`.
 
+### Deploy on Render
+
+`render.yaml` defines the web service (Docker, Starter plan, 5 GB persistent disk at `/data`) and a Postgres
+database, both in Singapore. In Render: **New → Blueprint**, pick this repo, enter `PORTAL_PASSWORD` and
+`PUBLIC_BASE_URL` when asked, and apply. `API_KEY` and `SESSION_SECRET` are generated for you (read `API_KEY`
+from the service's Environment tab). Keep it at one instance. Free plans cannot be used: they have no disk and
+spin down after 15 minutes, which would drop the WhatsApp connection.
+
 **Hosting:** needs an always-on process with persistent disk (VPS, Railway, Fly.io, Render with a disk).
 It cannot run on Vercel or other serverless platforms.
 
