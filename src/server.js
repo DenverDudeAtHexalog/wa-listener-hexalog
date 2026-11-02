@@ -31,7 +31,7 @@ export function buildApp() {
   });
 
   // ---- Portal --------------------------------------------------------------------------
-  app.use('/', express.static(path.join(here, '..', 'public'), { index: 'index.html' }));
+  app.use('/', express.static(path.join(here, '..', 'public'), { index: 'index.html', extensions: ['html'] }));
 
   app.post('/portal/login', (req, res) => {
     const ip = req.ip;

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hexalog WhatsApp Listener — API docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/hexalog.css">
+<style>
+  .wrap { max-width:1080px; margin:0 auto; padding:28px 20px 80px; display:grid; grid-template-columns:210px 1fr; gap:36px; }
+  @media (max-width:820px) { .wrap { grid-template-columns:1fr; } aside { position:static !important; } }
+  aside { position:sticky; top:16px; align-self:start; }
+  aside a { display:block; padding:7px 12px; border-radius:10px; color:var(--text); text-decoration:none; font-weight:600; font-size:14px; }
+  aside a:hover { background:var(--lav-200); }
+  section.doc { margin-bottom:44px; scroll-margin-top:16px; }
+  section.doc > h2 { font-size:26px; margin:0 0 6px; }
+  .lead { color:var(--muted); margin:0 0 16px; }
+  .ep { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; padding:14px 0; border-top:1px solid var(--line); }
+  .ep:first-of-type { border-top:0; }
+  .m { font:800 11px/1 var(--mono); padding:6px 8px; border-radius:8px; height:fit-content; min-width:58px; text-align:center; }
+  .GET { background:#dff7ea; color:#0f6b40; } .POST { background:var(--lav-200); color:var(--violet-700); } .PUT { background:#fff0c2; color:#8a5a00; } .DELETE { background:#ffe1de; color:#a32a21; }
+  .ep .p { font:600 14px var(--mono); word-break:break-all; }
+  .ep .d { grid-column:2; color:var(--muted); font-size:14px; }
+  .ep .b { grid-column:2; font:12.5px var(--mono); color:var(--muted); word-break:break-word; }
+  .tag { font-size:11px; font-weight:800; background:var(--yellow); color:#1c0f45; padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+  .note { background:var(--lav-100); border-left:4px solid var(--yellow); border-radius:12px; padding:12px 16px; margin:14px 0; font-size:14px; }
+  table { border-collapse:collapse; width:100%; font-size:14px; } td,th { text-align:left; padding:8px 10px; border-top:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; border-top:0; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="bar-in"><a class="logo" href="/"><i></i>HEXALOG</a>
+  <nav><a href="/">Portal</a><a class="on" href="/docs">API docs</a></nav></div></header>
+<section class="hero"><div class="hero-in">
+  <span class="pill">REST · Webhooks · Live stream</span>
+  <h1>WhatsApp Listener <mark>API</mark></h1>
+  <p>Read every CX group message (text, files, voice notes), get notified the moment one arrives, and, with the admin key, send messages and manage groups.</p>
+</div></section>
+
+<div class="wrap">
+<aside id="toc"></aside>
+<div id="content">
+
+<section class="doc" id="start">
+  <h2>Getting started</h2>
+  <p class="lead">Base URL for this server:</p>
+  <pre><code id="base"></code></pre>
+  <table>
+    <tr><th>Key</th><th>Header</th><th>Can do</th></tr>
+    <tr><td><b>Read key</b> <code>API_KEY</code></td><td><code>x-api-key: …</code> or <code>Authorization: Bearer …</code></td><td>All <code>GET</code> endpoints for messages, groups, media, stream, webhooks</td></tr>
+    <tr><td><b>Admin key</b> <code>ADMIN_API_KEY</code></td><td><code>x-api-key: …</code> (header only, never in a URL)</td><td>Everything that sends or changes something on WhatsApp</td></tr>
+  </table>
+  <pre><code id="ex1"></code></pre>
+  <div class="note">Keys are never shown on this page. Ask the CX tech owner for them and keep them out of front-end code and chat.</div>
+</section>
+
+<div id="sections"></div>
+
+<section class="doc" id="messages-obj">
+  <h2>Message object</h2>
+<pre><code>{
+  "uid": 42, "id": "3EB0...", "chat_jid": "1203630...@g.us", "group_name": "Acme - CX",
+  "sender_jid": "919800000001@s.whatsapp.net", "sender_phone": "919800000001", "sender_name": "Asha",
+  "timestamp": "2026-10-30T10:15:00.000Z", "type": "audio", "text": null, "quoted_id": null,
+  "is_voice_note": true, "deleted": false, "edited_at": null, "transcript": null,
+  "media": { "url": ".../api/media/42", "mime": "audio/ogg; codecs=opus", "size": 18234,
+             "filename": null, "seconds": 7, "error": null }
+}</code></pre>
+  <p>Filters on message lists: <code>limit</code> (max 500), <code>after_uid</code> (newer than a cursor, oldest first, use <code>next_after_uid</code>), <code>before_uid</code>, <code>since</code>, <code>until</code> (ISO times), <code>type</code> (text, image, video, audio, document, sticker, location, contact, poll), <code>sender</code> (phone), <code>search</code>.</p>
+</section>
+
+<section class="doc" id="webhooks-doc">
+  <h2>Webhooks and live stream</h2>
+  <p>Create a webhook with <code>POST /api/webhooks {"url":"https://you/hook","events":["message.created"]}</code>. The signing secret is shown once. Each delivery carries <code>X-Walistener-Signature: sha256=&lt;HMAC-SHA256 of the raw body&gt;</code>. Failures retry with backoff (10 s up to 1 h, 8 attempts).</p>
+  <p>Events: <code>message.created</code>, <code>message.updated</code>, <code>message.deleted</code>, <code>reaction</code>, <code>group.updated</code>, <code>connection</code>. The same events stream live from <code>GET /api/stream</code> (Server-Sent Events).</p>
+</section>
+
+<section class="doc" id="files">
+  <h2>Files and voice notes</h2>
+  <p>No files are stored on the server by default. <code>GET /api/media/:uid</code> fetches the file from WhatsApp at that moment. WhatsApp expires old files, after which the call returns <code>410</code>; anything you must keep should be fetched when <code>message.created</code> fires. While the number is disconnected the call returns <code>503</code>.</p>
+  <p>For transcripts, run speech-to-text on your side when a webhook arrives with <code>is_voice_note: true</code>, then write it back with <code>PUT /api/messages/:uid/transcript</code>.</p>
+</section>
+
+<section class="doc" id="safety">
+  <h2>Safety limits</h2>
+  <div class="note">Automated sending is the quickest way to get a WhatsApp number banned. Every action goes through one queue with random pauses (1.5 to 4 s between messages, 5 to 10 s between group actions). Limits answer <code>429</code>: 120 messages per hour, 10 new groups per day, 100 member changes per day. Group actions need the linked number to be an admin (otherwise <code>403</code>). Only message people who expect it. Every write is recorded in <code>GET /api/actions</code>.</div>
+  <p>Errors are JSON: <code>{"ok":false,"error":"..."}</code> with <code>400</code> bad input, <code>401</code> bad key, <code>403</code> not allowed or not admin, <code>404</code> not found, <code>410</code> file expired, <code>429</code> limit reached, <code>503</code> WhatsApp disconnected.</p>
+</section>
+
+</div>
+</div>
+
+<script>
+const BASE = location.origin;
+document.getElementById('base').textContent = BASE;
+document.getElementById('ex1').textContent =
+`curl -H "x-api-key: $API_KEY" "${BASE}/api/groups"
+
+curl -X POST "${BASE}/api/send/text" \\
+  -H "x-api-key: $ADMIN_API_KEY" -H "content-type: application/json" \\
+  -d '{"to":"1203630...@g.us","text":"Hello team"}'`;
+
+const R = 'read', W = 'admin';
+const S = [
+ ['read', 'Read: groups and messages', 'Needs the read key.', [
+  ['GET','/api/status','Connection state and linked number'],
+  ['GET','/api/groups?search=','Groups the number is in, with last message time and message count'],
+  ['GET','/api/groups/:jid/messages','Messages of one group (URL-encode the jid)'],
+  ['GET','/api/messages','Messages across all groups'],
+  ['GET','/api/messages/:uid','One message, including reactions'],
+  ['GET','/api/media/:uid','The file itself (image, video, document, voice note)'],
+  ['PUT','/api/messages/:uid/transcript','Attach a transcript from your speech-to-text worker','{"transcript":"..."}'],
+  ['GET','/api/stream','Server-Sent Events: live messages, edits, deletes, reactions, group and connection changes'],
+  ['GET','/api/webhooks','List webhooks'],
+  ['POST','/api/webhooks','Create a webhook','{"url":"https://you/hook","events":["message.created"]}'],
+  ['DELETE','/api/webhooks/:id','Remove a webhook'],
+  ['GET','/api/webhooks/:id/deliveries','Delivery status and retries'],
+ ]],
+ ['send', 'Write: send messages', 'Needs the admin key.', [
+  ['POST','/api/send/text','Send text. Tag people with @number in the text and list them in mentions','{"to","text","mentions?","reply_to_uid?"}'],
+  ['POST','/api/send/media','Image, video, audio, document or sticker. Voice note: type audio + voice_note true with ogg/opus','{"to","type","data_base64","caption?","filename?","mimetype?","voice_note?","reply_to_uid?"}'],
+  ['POST','/api/send/location','Location','{"to","latitude","longitude","name?","address?"}'],
+  ['POST','/api/send/contact','Contact card','{"to","contacts":[{"name","phone"}]}'],
+  ['POST','/api/send/poll','Poll','{"to","question","options","multi?"}'],
+  ['POST','/api/messages/:uid/react','React (empty emoji removes it)','{"emoji"}'],
+  ['POST','/api/messages/:uid/edit','Edit your own message','{"text"}'],
+  ['POST','/api/messages/:uid/delete','Delete your own message for everyone'],
+  ['POST','/api/messages/:uid/read','Mark as read'],
+  ['POST','/api/presence','Typing indicator','{"to","state":"composing|recording|paused"}'],
+  ['POST','/api/lookup','Which numbers are on WhatsApp','{"numbers":[...]}'],
+ ]],
+ ['groups', 'Write: manage groups', 'Needs the admin key. Group actions need the linked number to be an admin there.', [
+  ['POST','/api/groups','Create a group','{"subject","participants"}'],
+  ['POST','/api/groups/:jid/participants','add, remove, promote (make admin) or demote. Per-person results; invite_fallback DMs the invite link to people whose privacy blocks adding','{"action","participants","invite_fallback?","invite_message?"}'],
+  ['PUT','/api/groups/:jid/subject','Rename','{"subject"}'],
+  ['PUT','/api/groups/:jid/description','Set description','{"description"}'],
+  ['PUT','/api/groups/:jid/settings','Admin-only sending or editing, who can add members, join approval, disappearing messages','{"announce?","locked?","member_add_mode?","join_approval?","ephemeral_seconds?"}'],
+  ['PUT','/api/groups/:jid/picture','Set group icon','{"data_base64"}'],
+  ['DELETE','/api/groups/:jid/picture','Remove group icon'],
+  ['GET','/api/groups/:jid/invite','Get invite link'],
+  ['POST','/api/groups/:jid/invite/revoke','Reset the invite link'],
+  ['POST','/api/groups/join','Join from an invite link','{"invite"}'],
+  ['POST','/api/groups/:jid/leave','Leave the group'],
+  ['POST','/api/groups/:jid/refresh','Re-read members and settings'],
+  ['GET','/api/groups/:jid/join-requests','List pending join requests'],
+  ['POST','/api/groups/:jid/join-requests','Approve or reject','{"action":"approve|reject","participants"}'],
+ ]],
+ ['profile', 'Write: the number\'s own profile', 'Needs the admin key.', [
+  ['PUT','/api/profile/name','Display name','{"name"}'],
+  ['PUT','/api/profile/status','About text','{"status"}'],
+  ['PUT','/api/profile/picture','Profile photo','{"data_base64"}'],
+  ['DELETE','/api/profile/picture','Remove profile photo'],
+  ['GET','/api/actions','Audit log of everything done through the API'],
+ ]],
+];
+const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+const out = document.getElementById('sections');
+const toc = [['start','Getting started']];
+for (const [id, title, lead, eps] of S) {
+  toc.push([id, title]);
+  const sec = document.createElement('section'); sec.className = 'doc'; sec.id = id;
+  sec.innerHTML = `<h2>${esc(title)}</h2><p class="lead">${esc(lead)}</p>` + eps.map(([m, p, d, b]) =>
+    `<div class="ep"><span class="m ${m}">${m}</span><span class="p">${esc(p)}</span><span class="d">${esc(d)}</span>${b ? `<span class="b">${esc(b)}</span>` : ''}</div>`).join('');
+  out.append(sec);
+}
+toc.push(['messages-obj','Message object'],['webhooks-doc','Webhooks'],['files','Files'],['safety','Safety limits']);
+document.getElementById('toc').innerHTML = toc.map(([id, t]) => `<a href="#${id}">${esc(t)}</a>`).join('');
+</script>
+</body>
+</html>

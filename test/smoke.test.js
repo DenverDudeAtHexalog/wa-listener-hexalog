@@ -56,6 +56,8 @@ assert.equal(good.status, 200);
 const cookie = good.headers.get('set-cookie').split(';')[0];
 assert.equal((await fetch(base + '/portal/status', { headers: { cookie } })).status, 200);
 assert.equal((await fetch(base + '/', {})).status, 200, 'portal page served');
+assert.equal((await fetch(base + '/docs')).status, 200, 'docs page served publicly');
+assert.equal((await fetch(base + '/hexalog.css')).status, 200, 'brand css served');
 
 // register webhook
 const wh = await (await fetch(base + '/api/webhooks', { method: 'POST', headers: H, body: JSON.stringify({ url: hookUrl, events: ['message.created', 'message.deleted'] }) })).json();
