@@ -6,7 +6,9 @@ from . import common
 
 
 def list_groups(ctx):
-    ui.explain("GET /api/groups lists every group the linked number is in, with member and message counts.")
+    ui.explain("GET /api/groups lists every group the linked number(s) are in, with member and message counts.\n"
+               "With several numbers a group that two of them are in is listed once; the ids of the numbers that are in\n"
+               "it are shown. Pick one number in the Numbers menu to see only its groups.")
     s = ui.ask("Search by name (blank = all)")
     res = client.get(ctx, "/api/groups" + qs(search=s), show=False)
     if not res.ok:
@@ -14,7 +16,8 @@ def list_groups(ctx):
         return
     for g in res.get("groups", default=[]):
         ui.info(f"{g['subject'] or '(no name)'}  |  {g['participant_count']} members  |  {g['message_count']} messages")
-        ui.info(f"     id: {g['jid']}")
+        held = g.get("numbers") or []
+        ui.info(f"     id: {g['jid']}" + (f"   (number{'s' if len(held) > 1 else ''} {', '.join(str(x) for x in held)})" if held else ""))
     ui.good(f"{res.get('count')} groups")
 
 

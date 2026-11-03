@@ -15,11 +15,14 @@ def valid(raw_body: bytes, header: str, secret: str) -> bool:
 def watch(ctx):
     ui.explain("GET /api/stream is a Server-Sent Events connection. The server pushes message.created,\n"
                "message.updated, message.deleted, reaction, group.updated and connection events as they happen.\n"
+               "Every event says which number it came from (number_id).\n"
                "Send a message in a WhatsApp group now and watch it appear here. Press Ctrl+C (or the stop button)\nto stop.")
     if not ctx.cfg.api_key:
         ui.bad("Set the read key in Settings first.")
         return
-    req = urllib.request.Request(ctx.cfg.url + "/api/stream", headers={"x-api-key": ctx.cfg.api_key, "accept": "text/event-stream"})
+    path = "/api/stream" + (f"?number={ctx.number}" if ctx.number else "")
+    ui.info("Watching " + (f"number {ctx.number} only." if ctx.number else "all numbers (pick one in the Numbers menu to narrow it)."))
+    req = urllib.request.Request(ctx.cfg.url + path, headers={"x-api-key": ctx.cfg.api_key, "accept": "text/event-stream"})
     try:
         with urllib.request.urlopen(req, timeout=3600) as r:
             ui.good("Connected. Waiting for events...")

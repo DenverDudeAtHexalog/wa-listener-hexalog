@@ -2,6 +2,14 @@
 from .. import client, ui
 
 
+# True once we know the server has several numbers: then message lines show which number received them.
+_MULTI = {"on": False}
+
+
+def set_multi(on):
+    _MULTI["on"] = bool(on)
+
+
 def pick_group(ctx, prompt="Which group?"):
     """List the groups the number is in and let the user pick one (or paste a jid). Returns a jid or None."""
     res = client.get(ctx, "/api/groups", show=False)
@@ -69,4 +77,5 @@ def one_line(m):
         body += f"  <{m.get('type')}>"
     flags = (" (deleted)" if m.get("deleted") else "") + (" (edited)" if m.get("edited_at") else "")
     grp = f"{m.get('group_name') or ''}: " if m.get("group_name") else ""
-    return f"#{m.get('uid')} {t} {grp}{who}: {body[:90]}{flags}"
+    num = f"[n{m['number_id']}] " if _MULTI["on"] and m.get("number_id") is not None else ""
+    return f"#{m.get('uid')} {num}{t} {grp}{who}: {body[:90]}{flags}"

@@ -4,9 +4,9 @@ import time
 
 from .. import client, ui
 from ..client import enc
-from . import common, setup
+from . import common, numbers, setup
 
-TOTAL = 14
+TOTAL = 15
 
 
 class Stop(Exception):
@@ -48,20 +48,34 @@ def run(ctx):
                 ui.warn("Fix the connection first (see the messages above), then run the walkthrough again.")
                 return
         # 2
-        if _step(2, "Read: list groups", "GET /api/groups. Read key. This is how your system discovers which groups exist."):
+        if _step(2, "Choose which number to use",
+                 "GET /api/numbers. Each WhatsApp number is a separate login. With one number connected the server picks it;\n"
+                 "with several, every send / group action must say which one (a `number` field), or the server answers 400\n"
+                 "and lists them. Reads cover all numbers unless you add ?number=. Pick the number to run this test from."):
+            nums = numbers.show(ctx)
+            connected = [n for n in nums if n.get("linked")]
+            if len(connected) > 1:
+                numbers.choose(ctx)
+            elif connected:
+                ui.info(f"Only number {connected[0]['id']} is connected, so the server will use it by itself.")
+            elif nums:
+                ui.warn("No number is connected. Link one in the  Numbers  menu first.")
+                return
+        # 3
+        if _step(3, "Read: list groups", "GET /api/groups. Read key. This is how your system discovers which groups exist."):
             client.get(ctx, "/api/groups")
         # 3
-        if _step(3, "Read: recent messages across all groups",
+        if _step(4, "Read: recent messages across all groups",
                  "GET /api/messages?limit=5. Read key. Each message has a uid you can use later to react, edit or fetch files."):
             client.get(ctx, "/api/messages?limit=5")
         # 4
         nums = None
-        if _step(4, "Check your test numbers are on WhatsApp",
+        if _step(5, "Check your test numbers are on WhatsApp",
                  "POST /api/lookup. Admin key. Always do this before adding people to a group."):
             nums = common.test_numbers(ctx, "Your test numbers (comma separated, with country code)")
             client.post(ctx, "/api/lookup", {"numbers": nums})
         # 5
-        if _step(5, "Create a test group", "POST /api/groups. Admin key. The linked number becomes admin. Paced by the server, may take 10+ seconds."):
+        if _step(6, "Create a test group", "POST /api/groups. Admin key. The linked number becomes admin. Paced by the server, may take 10+ seconds."):
             nums = nums or common.test_numbers(ctx)
             name = "API test " + time.strftime("%H:%M")
             r = client.post(ctx, "/api/groups", {"subject": name, "participants": nums})
@@ -76,17 +90,17 @@ def run(ctx):
                 return
         jid = state["jid"]
         # 6
-        if _step(6, "Send a text message", "POST /api/send/text. The reply includes the message uid."):
+        if _step(7, "Send a text message", "POST /api/send/text. The reply includes the message uid."):
             r = client.post(ctx, "/api/send/text", {"to": jid, "text": "Hello from the API walkthrough"})
             state["uid"] = r.get("uid") if r.ok else None
         # 7
-        if _step(7, "Send a poll", "POST /api/send/poll. Polls, locations, contacts and files all work the same way."):
+        if _step(8, "Send a poll", "POST /api/send/poll. Polls, locations, contacts and files all work the same way."):
             client.post(ctx, "/api/send/poll", {"to": jid, "question": "Is the API working?", "options": ["Yes", "No"]})
         # 8
-        if _step(8, "Send a location", "POST /api/send/location."):
+        if _step(9, "Send a location", "POST /api/send/location."):
             client.post(ctx, "/api/send/location", {"to": jid, "latitude": 19.076, "longitude": 72.8777, "name": "Mumbai"})
         # 9
-        if _step(9, "React to and edit your text message",
+        if _step(10, "React to and edit your text message",
                  "POST /api/messages/:uid/react and /edit. These use the uid of a message the linked number sent."):
             uid = state["uid"] or _last_sent_uid(ctx, jid)
             if uid:
@@ -96,20 +110,20 @@ def run(ctx):
             else:
                 ui.warn("Could not find the message uid, skipping.")
         # 10
-        if _step(10, "Rename the group and set a description", "PUT /api/groups/:jid/subject and /description."):
+        if _step(11, "Rename the group and set a description", "PUT /api/groups/:jid/subject and /description."):
             client.put(ctx, f"/api/groups/{enc(jid)}/subject", {"subject": "API test (renamed)"})
             client.put(ctx, f"/api/groups/{enc(jid)}/description", {"description": "Created by the API walkthrough"})
         # 11
-        if _step(11, "Make someone admin, then remove admin again",
+        if _step(12, "Make someone admin, then remove admin again",
                  "POST /api/groups/:jid/participants with action promote, then demote. Needs a number that is in the group."):
             nums = nums or common.test_numbers(ctx)
             client.post(ctx, f"/api/groups/{enc(jid)}/participants", {"action": "promote", "participants": nums[:1]})
             client.post(ctx, f"/api/groups/{enc(jid)}/participants", {"action": "demote", "participants": nums[:1]})
         # 12
-        if _step(12, "Get the invite link", "GET /api/groups/:jid/invite. Anyone with the link can join, so treat it as sensitive."):
+        if _step(13, "Get the invite link", "GET /api/groups/:jid/invite. Anyone with the link can join, so treat it as sensitive."):
             client.get(ctx, f"/api/groups/{enc(jid)}/invite", admin=True)
         # 13
-        if _step(13, "Read the group back, and see the audit log",
+        if _step(14, "Read the group back, and see the audit log",
                  "Messages the number sends are stored like any other (from_me = true). GET /api/actions lists every\n"
                  "write you did through the API."):
             time.sleep(2)
@@ -118,7 +132,7 @@ def run(ctx):
                 ui.info(common.one_line(m))
             client.get(ctx, "/api/actions?limit=10", admin=True)
         # 14
-        if _step(14, "Clean up", "Delete the text message for everyone and leave the test group."):
+        if _step(15, "Clean up", "Delete the text message for everyone and leave the test group."):
             if state["uid"] and ui.confirm("Delete the text message for everyone?", default=True):
                 client.post(ctx, f"/api/messages/{state['uid']}/delete")
             if ui.confirm("Leave the test group now?", default=True):

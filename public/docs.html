@@ -17,8 +17,9 @@
   .lead { color:var(--muted); margin:0 0 16px; }
   .ep { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; padding:14px 0; border-top:1px solid var(--line); }
   .ep:first-of-type { border-top:0; }
-  .m { font:800 11px/1 var(--mono); padding:6px 8px; border-radius:8px; height:fit-content; min-width:58px; text-align:center; }
-  .GET { background:#dff7ea; color:#0f6b40; } .POST { background:var(--lav-200); color:var(--violet-700); } .PUT { background:#fff0c2; color:#8a5a00; } .DELETE { background:#ffe1de; color:#a32a21; }
+  .m { font:800 12px/1 var(--mono); padding:7px 10px; border-radius:8px; height:fit-content; min-width:68px; text-align:center; letter-spacing:.02em; white-space:nowrap; }
+  /* fixed colours (not theme variables) so every badge stays readable in light and dark mode */
+  .GET { background:#dff7ea; color:#0f6b40; } .POST { background:#e4daff; color:#3d12a8; } .PUT { background:#fff0c2; color:#8a5a00; } .DELETE { background:#ffe1de; color:#a32a21; }
   .ep .p { font:600 14px var(--mono); word-break:break-all; }
   .ep .d { grid-column:2; color:var(--muted); font-size:14px; }
   .ep .b { grid-column:2; font:12.5px var(--mono); color:var(--muted); word-break:break-word; }
@@ -46,16 +47,18 @@
   <pre><code id="base"></code></pre>
   <table>
     <tr><th>Key</th><th>Header</th><th>Can do</th></tr>
-    <tr><td><b>Read key</b> <code>API_KEY</code></td><td><code>x-api-key: …</code> or <code>Authorization: Bearer …</code></td><td>All <code>GET</code> endpoints for messages, groups, media, stream, webhooks</td></tr>
-    <tr><td><b>Admin key</b> <code>ADMIN_API_KEY</code></td><td><code>x-api-key: …</code> (header only, never in a URL)</td><td>Everything that sends or changes something on WhatsApp</td></tr>
+    <tr><td><b>Read key</b> <code>API_KEY</code></td><td><code>x-api-key: …</code> or <code>Authorization: Bearer …</code>. Read endpoints also accept <code>?api_key=…</code> (for EventSource and media links)</td><td>Everything under "Read" below: groups, messages, media, stream, numbers, webhooks (list, create, delete) and transcripts. It cannot send or change anything on WhatsApp.</td></tr>
+    <tr><td><b>Admin key</b> <code>ADMIN_API_KEY</code></td><td><code>x-api-key: …</code> or <code>Authorization: Bearer …</code> (header only, never in a URL)</td><td>Everything the read key can do, plus everything that sends or changes something on WhatsApp. Writing is off (<code>403</code>) until <code>ADMIN_API_KEY</code> is set on the server.</td></tr>
   </table>
   <pre><code id="ex1"></code></pre>
   <div class="note">Keys are never shown on this page. Ask the CX tech owner for them and keep them out of front-end code and chat.</div>
+  <p><b>Identifiers.</b> Wherever an endpoint takes a person (<code>to</code>, <code>participants</code>, <code>mentions</code>, <code>sender</code>) you can pass digits with country code (for example <code>919800000001</code>) or a full JID. Group ids always end in <code>@g.us</code> and must be URL-encoded in paths.</p>
+  <p><b>Health.</b> <code>GET /health</code> needs no key and returns <code>{"ok":true,"whatsapp":"open","numbers":{"total":1,"open":1}}</code>. It only checks the database (<code>503</code> if that fails), so a green result does not mean a number is linked. Use <code>GET /api/status</code> for that.</p>
 </section>
 
 <section class="doc" id="numbers-doc">
   <h2>Several WhatsApp numbers</h2>
-  <p>The service can run many WhatsApp numbers at once, each as its own isolated login. One read key and one admin key cover all of them. <code>GET /api/numbers</code> lists them with their <code>id</code>, label, phone and state.</p>
+  <p>The service can run many WhatsApp numbers at once, each as its own isolated login. One read key and one admin key cover all of them. <code>GET /api/numbers</code> lists them with their <code>id</code>, <code>label</code>, <code>phone</code>, <code>state</code>, <code>linked</code>, <code>me</code>, <code>last_error</code> and <code>writes_enabled</code>. <code>state</code> is one of <code>idle</code>, <code>connecting</code>, <code>qr</code>, <code>pairing</code>, <code>open</code> (listening), <code>reconnecting</code>, <code>logged_out</code> or <code>replaced</code> (the number is connected somewhere else). Numbers are added and linked in the portal, not through this API.</p>
   <p><b>Reading:</b> by default you see every number together, and a message received by two numbers (both are in the same group) appears once. Add <code>?number=2</code> (id or phone) to see only that number. Message and group objects carry <code>number_id</code>.</p>
   <p><b>Writing:</b> the server picks the number when it is obvious: the only one that is connected, the only one in that group, or the one that received the message you are reacting to or editing. When several could do it, you get HTTP 400 listing them; repeat the request with <code>"number": 2</code> in the body (id or phone). Responses include <code>"number"</code> so you know which one acted.</p>
   <pre><code>curl -X POST "BASE/api/send/text" -H "x-api-key: $ADMIN_API_KEY" -H "content-type: application/json" \
@@ -68,32 +71,50 @@
 <section class="doc" id="messages-obj">
   <h2>Message object</h2>
 <pre><code>{
-  "uid": 42, "id": "3EB0...", "chat_jid": "1203630...@g.us", "group_name": "Acme - CX",
-  "sender_jid": "919800000001@s.whatsapp.net", "sender_phone": "919800000001", "sender_name": "Asha",
-  "timestamp": "2026-10-30T10:15:00.000Z", "type": "audio", "text": null, "quoted_id": null,
+  "uid": 42, "number_id": 1, "id": "3EB0...", "chat_jid": "1203630...@g.us", "group_name": "Acme - CX",
+  "sender_jid": "919800000001@s.whatsapp.net", "sender_phone": "919800000001", "sender_name": "Asha", "from_me": false,
+  "timestamp": "2026-10-30T10:15:00.000Z", "type": "audio", "text": null, "quoted_id": null, "mentions": null,
   "is_voice_note": true, "deleted": false, "edited_at": null, "transcript": null,
-  "media": { "url": ".../api/media/42", "mime": "audio/ogg; codecs=opus", "size": 18234,
+  "media": { "url": ".../api/media/42", "stored": false, "mime": "audio/ogg; codecs=opus", "size": 18234,
              "filename": null, "seconds": 7, "error": null }
 }</code></pre>
-  <p>Filters on message lists: <code>limit</code> (max 500), <code>after_uid</code> (newer than a cursor, oldest first, use <code>next_after_uid</code>), <code>before_uid</code>, <code>since</code>, <code>until</code> (ISO times), <code>type</code> (text, image, video, audio, document, sticker, location, contact, poll), <code>sender</code> (phone), <code>search</code>.</p>
+  <p>Message lists return <code>{"count","next_after_uid","messages":[…]}</code>. Filters: <code>number</code> (id or phone), <code>limit</code> (1 to 500, default 100), <code>after_uid</code> (newer than a cursor, oldest first, use <code>next_after_uid</code>), <code>before_uid</code>, <code>since</code>, <code>until</code> (ISO times), <code>type</code> (comma list: text, image, video, audio, document, sticker, location, contact, poll), <code>sender</code> (phone), <code>search</code> (text contains, case-insensitive). Without <code>after_uid</code> the newest messages come first.</p>
+  <p><b>What is recorded.</b></p>
+  <table>
+    <tr><td><b>Chats</b></td><td>Groups only by default. 1:1 chats are recorded only if the server sets <code>INCLUDE_DIRECT_CHATS=true</code>. Status updates, broadcast lists and channels are never recorded.</td></tr>
+    <tr><td><b>Fields</b></td><td><code>from_me</code> is true for messages the linked number sent (also those sent through this API). <code>media</code> is <code>null</code> for messages without a file; <code>media.stored</code> says whether the file sits on the server or is fetched from WhatsApp when opened.</td></tr>
+    <tr><td><b>Edits and deletes</b></td><td>A text edit updates <code>text</code> and sets <code>edited_at</code>. A delete sets <code>deleted: true</code>; the stored <code>text</code> is kept. Caption edits on media are not tracked.</td></tr>
+    <tr><td><b>Other types</b></td><td>Content that is not text, location, contact, poll or a file is stored with <code>type</code> set to its WhatsApp kind (for example <code>pollUpdate</code>) and no text. Poll votes are not counted.</td></tr>
+    <tr><td><b>History</b></td><td>Recent history that WhatsApp sends when a number is first linked is stored, but it does not fire webhooks or stream events. Older history cannot be requested, and messages sent while the service is down may be missed.</td></tr>
+    <tr><td><b>Same group, two numbers</b></td><td>Each number keeps its own copy. Lists show one copy per message unless you pass <code>number</code>; only that first copy fires webhooks and events.</td></tr>
+  </table>
 </section>
 
 <section class="doc" id="webhooks-doc">
   <h2>Webhooks and live stream</h2>
-  <p>Create a webhook with <code>POST /api/webhooks {"url":"https://you/hook","events":["message.created"]}</code>. The signing secret is shown once. Each delivery carries <code>X-Walistener-Signature: sha256=&lt;HMAC-SHA256 of the raw body&gt;</code>. Failures retry with backoff (10 s up to 1 h, 8 attempts).</p>
-  <p>Events: <code>message.created</code>, <code>message.updated</code>, <code>message.deleted</code>, <code>reaction</code>, <code>group.updated</code>, <code>connection</code>. The same events stream live from <code>GET /api/stream</code> (Server-Sent Events).</p>
+  <p>Create a webhook with <code>POST /api/webhooks {"url":"https://you/hook","events":["message.created"]}</code>. Leave <code>events</code> empty or out for all events. <code>secret</code> is optional; if you leave it out one is generated. The answer is <code>201</code> with <code>{"id","url","events","secret"}</code>. The secret is shown only then; listings never include it. Any http(s) URL is accepted.</p>
+  <p>Each delivery is a <code>POST</code> with a JSON body <code>{"event","ts","data","delivery_id"}</code> and the headers <code>X-Walistener-Event</code>, <code>X-Walistener-Delivery</code> and <code>X-Walistener-Signature: sha256=&lt;HMAC-SHA256 of the raw body&gt;</code>. Answer with a 2xx within 10 seconds. Failures retry with backoff (10 s, 20 s, 40 s and so on up to 1 h), 8 attempts by default, then the delivery is marked <code>failed</code>. Check them with <code>GET /api/webhooks/:id/deliveries</code> (latest 100).</p>
+  <table>
+    <tr><th>Event</th><th><code>data</code></th></tr>
+    <tr><td><code>message.created</code>, <code>message.updated</code></td><td>The message object (updated: after an edit or a transcript)</td></tr>
+    <tr><td><code>message.deleted</code></td><td><code>{number_id, chat_jid, id, uid}</code></td></tr>
+    <tr><td><code>reaction</code></td><td><code>{number_id, chat_jid, message_id, reactor_jid, emoji, timestamp}</code> (<code>emoji</code> is empty when a reaction is removed)</td></tr>
+    <tr><td><code>group.updated</code></td><td><code>{number_id, jid}</code>, or <code>{number_id, count}</code> after a full group sync</td></tr>
+    <tr><td><code>connection</code></td><td><code>{number_id, state, linked, me, last_error}</code> (never a QR code)</td></tr>
+  </table>
+  <p>The same events stream live from <code>GET /api/stream</code> (Server-Sent Events; optional <code>?number=</code> to follow one number; <code>?api_key=</code> is allowed because EventSource cannot set headers). The stream has no replay: a client that disconnects misses events, so catch up with <code>after_uid</code>. Webhooks are queued and retried instead.</p>
 </section>
 
 <section class="doc" id="files">
   <h2>Files and voice notes</h2>
-  <p>No files are stored on the server by default. <code>GET /api/media/:uid</code> fetches the file from WhatsApp at that moment. WhatsApp expires old files, after which the call returns <code>410</code>; anything you must keep should be fetched when <code>message.created</code> fires. While the number is disconnected the call returns <code>503</code>.</p>
+  <p>No files are stored on the server by default. <code>GET /api/media/:uid</code> fetches the file from WhatsApp at that moment (through the number that received it, or another connected number that has a copy) and returns the raw bytes with the right content type. WhatsApp expires old files, after which the call returns <code>410</code>; anything you must keep should be fetched when <code>message.created</code> fires. Other answers: <code>404</code> the message has no file, <code>413</code> the file is larger than the server's <code>MAX_MEDIA_MB</code> (default 50), <code>503</code> the number is disconnected. If the server runs with <code>MEDIA_MODE=store</code>, files are also saved to its disk and keep working after WhatsApp expires them; <code>media.stored</code> tells you which case a message is in.</p>
   <p>For transcripts, run speech-to-text on your side when a webhook arrives with <code>is_voice_note: true</code>, then write it back with <code>PUT /api/messages/:uid/transcript</code>.</p>
 </section>
 
 <section class="doc" id="safety">
   <h2>Safety limits</h2>
-  <div class="note">Automated sending is the quickest way to get a WhatsApp number banned. Every action goes through one queue with random pauses (1.5 to 4 s between messages, 5 to 10 s between group actions). Limits answer <code>429</code>: 120 messages per hour, 10 new groups per day, 100 member changes per day. Group actions need the linked number to be an admin (otherwise <code>403</code>). Only message people who expect it. Every write is recorded in <code>GET /api/actions</code>.</div>
-  <p>Errors are JSON: <code>{"ok":false,"error":"..."}</code> with <code>400</code> bad input, <code>401</code> bad key, <code>403</code> not allowed or not admin, <code>404</code> not found, <code>410</code> file expired, <code>429</code> limit reached, <code>503</code> WhatsApp disconnected.</p>
+  <div class="note">Automated sending is the quickest way to get a WhatsApp number banned. Every action goes through one queue with random pauses (1.5 to 4 s between messages, 5 to 10 s between group actions). Limits answer <code>429</code>: 120 messages per hour, 10 new groups per day, 100 member changes per day (per number; the server can change them). A queue of more than 50 waiting actions also answers <code>429</code>. Group actions need the linked number to be an admin (otherwise <code>403</code>). Only message people who expect it. Every write is recorded in <code>GET /api/actions</code>.</div>
+  <p>Successful writes answer <code>{"ok":true,"number":1,…}</code>. Errors are JSON: write endpoints answer <code>{"ok":false,"error":"..."}</code> and read endpoints answer <code>{"error":"..."}</code>. Status codes: <code>400</code> bad input or several numbers could do it, <code>401</code> missing or invalid key, <code>403</code> wrong key for a write, writing disabled, or the number is not a group admin, <code>404</code> not found, <code>409</code> not allowed on this message (for example editing a message the linked number did not send), <code>410</code> file expired, <code>413</code> file too large, <code>429</code> limit reached or queue full, <code>502</code> WhatsApp refused, <code>503</code> WhatsApp disconnected, <code>504</code> WhatsApp did not answer in time.</p>
 </section>
 
 </div>
@@ -111,22 +132,23 @@ curl -X POST "${BASE}/api/send/text" \\
 
 const R = 'read', W = 'admin';
 const S = [
- ['read', 'Read: groups and messages', 'Needs the read key.', [
-  ['GET','/api/status','Connection state and linked number(s)'],
-  ['GET','/api/numbers','The WhatsApp numbers: id, label, phone, state'],
-  ['GET','/api/groups?search=&number=','Groups the numbers are in (number optional), with last message time and message count'],
-  ['GET','/api/groups/:jid/messages','Messages of one group (URL-encode the jid)'],
-  ['GET','/api/messages?number=','Messages across all groups (number optional)'],
-  ['GET','/api/messages/:uid','One message, including reactions'],
-  ['GET','/api/media/:uid','The file itself (image, video, document, voice note)'],
-  ['PUT','/api/messages/:uid/transcript','Attach a transcript from your speech-to-text worker','{"transcript":"..."}'],
-  ['GET','/api/stream','Server-Sent Events: live messages, edits, deletes, reactions, group and connection changes'],
-  ['GET','/api/webhooks','List webhooks'],
-  ['POST','/api/webhooks','Create a webhook','{"url":"https://you/hook","events":["message.created"]}'],
+ ['read', 'Read: groups and messages', 'Needs the read key (the admin key also works). Add ?number=<id or phone> to narrow a read to one number.', [
+  ['GET','/api/status','Connection state, linked number and every number\'s status'],
+  ['GET','/api/numbers','The WhatsApp numbers: id, label, phone, state, linked, me, last_error, writes_enabled'],
+  ['GET','/api/groups?search=&number=','Groups the numbers are in (number optional), with subject, description, participant_count, numbers[], last message time and message count'],
+  ['GET','/api/groups/:jid','One group with its members (jid, lid, admin flag), owner and the numbers that are in it'],
+  ['GET','/api/groups/:jid/messages','Messages of one group (URL-encode the jid). Filters: see Message object'],
+  ['GET','/api/messages?number=','Messages across all groups (number optional). Filters: see Message object'],
+  ['GET','/api/messages/:uid','One message, including reactions [{reactor_jid, emoji, ts}]'],
+  ['GET','/api/media/:uid','The file itself (image, video, document, voice note), fetched from WhatsApp unless stored on the server'],
+  ['PUT','/api/messages/:uid/transcript','Attach a transcript from your speech-to-text worker. Works with the read key and fires message.updated','{"transcript":"..."}'],
+  ['GET','/api/stream?number=','Server-Sent Events: live messages, edits, deletes, reactions, group and connection changes (no replay)'],
+  ['GET','/api/webhooks','List webhooks (url, events, active) and the available event names'],
+  ['POST','/api/webhooks','Create a webhook. Answers 201 with the signing secret, shown once','{"url":"https://you/hook","events":["message.created"],"secret?"}'],
   ['DELETE','/api/webhooks/:id','Remove a webhook'],
-  ['GET','/api/webhooks/:id/deliveries','Delivery status and retries'],
+  ['GET','/api/webhooks/:id/deliveries','Latest 100 deliveries: event, status, attempts, last_error, created_at, delivered_at'],
  ]],
- ['send', 'Write: send messages', 'Needs the admin key.', [
+ ['send', 'Write: send messages', 'Needs the admin key. Add "number" to the body when several numbers could do it. Sends answer {ok, number, id, uid, to}; the sent message is stored like any other with from_me true. Files go in as base64 and are limited by the server\'s MAX_MEDIA_MB.', [
   ['POST','/api/send/text','Send text. Tag people with @number in the text and list them in mentions','{"to","text","mentions?","reply_to_uid?"}'],
   ['POST','/api/send/media','Image, video, audio, document or sticker. Voice note: type audio + voice_note true with ogg/opus','{"to","type","data_base64","caption?","filename?","mimetype?","voice_note?","reply_to_uid?"}'],
   ['POST','/api/send/location','Location','{"to","latitude","longitude","name?","address?"}'],
@@ -136,12 +158,12 @@ const S = [
   ['POST','/api/messages/:uid/edit','Edit your own message','{"text"}'],
   ['POST','/api/messages/:uid/delete','Delete your own message for everyone'],
   ['POST','/api/messages/:uid/read','Mark as read'],
-  ['POST','/api/presence','Typing indicator','{"to","state":"composing|recording|paused"}'],
+  ['POST','/api/presence','Typing indicator or online state','{"to","state":"composing|recording|paused|available|unavailable"}'],
   ['POST','/api/lookup','Which numbers are on WhatsApp','{"numbers":[...]}'],
  ]],
  ['groups', 'Write: manage groups', 'Needs the admin key. Group actions need the linked number to be an admin there.', [
-  ['POST','/api/groups','Create a group','{"subject","participants"}'],
-  ['POST','/api/groups/:jid/participants','add, remove, promote (make admin) or demote. Per-person results; invite_fallback DMs the invite link to people whose privacy blocks adding','{"action","participants","invite_fallback?","invite_message?"}'],
+  ['POST','/api/groups','Create a group (up to 256 participants, subject up to 100 characters). Numbers are checked to be on WhatsApp first unless verify is false. Answers {jid, subject, participants}','{"subject","participants","verify?"}'],
+  ['POST','/api/groups/:jid/participants','add, remove, promote (make admin) or demote, up to 50 people per call. Per-person results (jid, ok, status, reason); invite_fallback DMs the invite link to people whose privacy blocks adding. Adds and removes count toward the daily member limit','{"action","participants","verify?","invite_fallback?","invite_message?"}'],
   ['PUT','/api/groups/:jid/subject','Rename','{"subject"}'],
   ['PUT','/api/groups/:jid/description','Set description','{"description"}'],
   ['PUT','/api/groups/:jid/settings','Admin-only sending or editing, who can add members, join approval, disappearing messages','{"announce?","locked?","member_add_mode?","join_approval?","ephemeral_seconds?"}'],
@@ -160,7 +182,7 @@ const S = [
   ['PUT','/api/profile/status','About text','{"status"}'],
   ['PUT','/api/profile/picture','Profile photo','{"data_base64"}'],
   ['DELETE','/api/profile/picture','Remove profile photo'],
-  ['GET','/api/actions','Audit log of everything done through the API'],
+  ['GET','/api/actions?limit=&number=','Audit log of everything done through the API (latest first, limit up to 500). Needs the admin key'],
  ]],
 ];
 const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));

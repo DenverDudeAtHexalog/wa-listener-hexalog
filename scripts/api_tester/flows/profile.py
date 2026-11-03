@@ -28,13 +28,13 @@ def picture(ctx):
 
 
 def audit(ctx):
-    ui.explain("GET /api/actions is the audit log: every send, group change and profile change made through\nthe API, with its result.")
+    ui.explain("GET /api/actions is the audit log: every send, group change and profile change made through\nthe API, with its result and the number it ran on (n1, n2...). Choose a number in the\nNumbers menu to see only that one.")
     res = client.get(ctx, f"/api/actions?limit={ui.ask('How many entries', default='15')}", admin=True, show=False)
     if not res.ok:
         client.get(ctx, "/api/actions?limit=1", admin=True)
         return
     for a in res.get("actions", default=[]):
-        ui.info(f"{str(a.get('ts'))[:19]}  {a.get('action', ''):<16} {str(a.get('target') or '')[:32]:<32} {'ok' if a.get('ok') else 'FAILED: ' + str(a.get('error'))}")
+        ui.info(f"{str(a.get('ts'))[:19]}  n{a.get('number_id', '?'):<2} {a.get('action', ''):<16} {str(a.get('target') or '')[:32]:<32} {'ok' if a.get('ok') else 'FAILED: ' + str(a.get('error'))}")
 
 
 def menu(ctx):
