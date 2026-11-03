@@ -15,6 +15,8 @@
   .qrimg { display:block; margin:16px auto 4px; width:260px; height:260px; border-radius:16px; background:#fff; padding:10px; border:1.5px solid var(--line); }
   .code { font:800 32px/1.2 var(--mono); letter-spacing:.12em; text-align:center; margin:16px 0 4px; color:var(--accent); }
   .err { color:var(--danger); font-size:13px; min-height:18px; margin-top:8px; }
+  .num h3 { margin:0; font-size:18px; } .num .head { display:flex; align-items:center; gap:10px; justify-content:space-between; }
+  .num input.ph { margin-top:12px; }
   ol { padding-left:20px; margin:8px 0 0; color:var(--muted); font-size:13px; }
 </style>
 </head>
@@ -23,8 +25,8 @@
   <nav><a class="on" href="/">Portal</a><a href="/docs">API docs</a></nav></div></header>
 <section class="hero"><div class="hero-in">
   <span class="pill">CX WhatsApp listener</span>
-  <h1>One number. <mark>Every CX group.</mark></h1>
-  <p>Link the CX number once. After that it listens to every group it has been added to, and your systems read it through the API.</p>
+  <h1>Your numbers. <mark>Every CX group.</mark></h1>
+  <p>Link each CX number once. After that it listens to every group it has been added to, and your systems read them all through one API.</p>
 </div></section>
 <main>
 
@@ -38,39 +40,13 @@
 
   <!-- Dashboard -->
   <section id="dash" hidden>
-    <div class="card">
-      <div class="status"><span class="dot" id="dot"></span><span id="stateText">…</span></div>
-      <div class="muted" id="meText" style="margin-top:4px"></div>
-      <div class="muted" id="errText" style="margin-top:4px"></div>
-
-      <div id="qrBox" hidden>
-        <img id="qrImg" class="qrimg" alt="WhatsApp QR code">
-        <ol>
-          <li>Open WhatsApp on the phone that has the CX number</li>
-          <li>Settings → Linked devices → Link a device</li>
-          <li>Scan this code (it refreshes every ~20 seconds)</li>
-        </ol>
-      </div>
-
-      <div id="pairBox" hidden>
-        <div class="code" id="pairCode"></div>
-        <ol>
-          <li>On the phone: Settings → Linked devices → Link a device</li>
-          <li>Tap “Link with phone number instead”</li>
-          <li>Enter the code above</li>
-        </ol>
-      </div>
-
-      <div class="row" id="actions"></div>
-      <div class="err" id="actErr"></div>
+    <div id="numbers"></div>
+    <div class="card" id="addCard">
+      <label for="newLabel">Add another WhatsApp number</label>
+      <input id="newLabel" placeholder="Name, e.g. Delhi CX or Support 2" maxlength="60">
+      <div class="row"><button id="addBtn" class="primary">Add number</button><span class="muted" id="maxText" style="align-self:center"></span></div>
+      <div class="err" id="addErr"></div>
     </div>
-
-    <div class="card" id="phoneCard" hidden>
-      <label for="phone">Or link with a pairing code (no QR scan needed)</label>
-      <input id="phone" inputmode="numeric" placeholder="Phone number with country code, e.g. 919311855419">
-      <div class="row"><button id="pairBtn">Get pairing code</button></div>
-    </div>
-
     <div class="card muted" id="statsCard" hidden></div>
     <div class="row" style="justify-content:space-between"><span class="muted" id="modeText"></span><span><a href="/docs" class="muted">API docs</a> &nbsp; <button id="logoutBtn">Sign out</button></span></div>
   </section>
@@ -79,7 +55,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const LABEL = { idle:'Not connected', connecting:'Connecting…', qr:'Waiting for QR scan', pairing:'Waiting for pairing code entry', open:'Connected and listening', reconnecting:'Reconnecting…', logged_out:'Unlinked — link again', replaced:'Number is connected somewhere else' };
-let es = null;
+let es = null, lastKey = '';
+const phoneDraft = {};   // id -> text typed in the pairing-phone box, kept across live updates
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { method: opts.method || 'GET', headers: opts.body ? { 'content-type':'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -88,38 +65,71 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 }
-
 function showLogin() { if (es) es.close(); $('login').hidden = false; $('dash').hidden = true; }
 function showDash() { $('login').hidden = true; $('dash').hidden = false; listen(); }
+function listen() { if (es) es.close(); es = new EventSource('/portal/events'); es.onmessage = (e) => render(JSON.parse(e.data)); }
 
-function listen() {
-  if (es) es.close();
-  es = new EventSource('/portal/events');
-  es.onmessage = (e) => render(JSON.parse(e.data));
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function btn(text, cls, errBox, fn) {
+  const b = el('button', cls, text);
+  b.onclick = async () => { errBox.textContent = ''; b.disabled = true; try { await fn(); } catch (e) { errBox.textContent = e.message; } b.disabled = false; };
+  return b;
 }
 
-function btn(text, cls, fn) { const b = document.createElement('button'); b.textContent = text; if (cls) b.className = cls; b.onclick = async () => { $('actErr').textContent=''; b.disabled = true; try { await fn(); } catch (e) { $('actErr').textContent = e.message; } b.disabled = false; }; return b; }
-
-function render(s) {
-  $('dot').className = 'dot s-' + s.state;
-  $('stateText').textContent = LABEL[s.state] || s.state;
-  $('meText').textContent = s.me ? 'Linked as ' + s.me.jid.split(':')[0].split('@')[0] + (s.me.name ? ' (' + s.me.name + ')' : '') : '';
-  $('errText').textContent = s.state !== 'open' && s.last_error ? s.last_error : '';
-  $('qrBox').hidden = !s.qr; if (s.qr) $('qrImg').src = s.qr;
-  $('pairBox').hidden = !s.pairing_code; $('pairCode').textContent = s.pairing_code || '';
-  $('phoneCard').hidden = s.state === 'open';
-  $('modeText').textContent = s.writes_enabled ? 'Sending and group management are enabled for the admin API key.' : 'Listen-only: sending is disabled.';
-
-  const a = $('actions'); a.replaceChildren();
-  if (s.state === 'open') {
-    a.append(btn('Pause listening', '', () => api('/portal/disconnect', { method:'POST' })));
-    a.append(btn('Unlink number', 'danger', async () => { if (confirm('Unlink this number? You will need to scan again.')) await api('/portal/unlink', { method:'POST' }); }));
-  } else if (['idle','logged_out','replaced'].includes(s.state)) {
-    a.append(btn('Link with QR code', 'primary', () => api('/portal/connect', { method:'POST', body:{} })));
-  } else {
-    a.append(btn('Cancel', '', () => api('/portal/disconnect', { method:'POST' })));
+function card(n) {
+  const c = el('div', 'card num'); c.dataset.id = n.id;
+  const err = el('div', 'err');
+  const head = el('div', 'head');
+  const left = el('div');
+  const st = el('div', 'status'); st.append(el('span', 'dot s-' + n.state), el('span', '', LABEL[n.state] || n.state));
+  left.append(el('h3', '', n.label), st);
+  head.append(left, el('span', 'muted', 'ID ' + n.id));
+  c.append(head);
+  const who = n.me ? 'Linked as ' + n.me.jid.split(':')[0].split('@')[0] + (n.me.name ? ' (' + n.me.name + ')' : '') : (n.phone ? 'Number ' + n.phone : '');
+  if (who) c.append(el('div', 'muted', who));
+  if (n.state !== 'open' && n.last_error) c.append(el('div', 'muted', n.last_error));
+  if (n.qr) {
+    const img = el('img', 'qrimg'); img.alt = 'WhatsApp QR code'; img.src = n.qr; c.append(img);
+    const ol = el('ol'); ['Open WhatsApp on the phone that has this number', 'Settings → Linked devices → Link a device', 'Scan this code (it refreshes every ~20 seconds)'].forEach((t) => ol.append(el('li', '', t))); c.append(ol);
   }
-  loadStats(s.state === 'open');
+  if (n.pairing_code) {
+    c.append(el('div', 'code', n.pairing_code));
+    const ol = el('ol'); ['On the phone: Settings → Linked devices → Link a device', 'Tap “Link with phone number instead”', 'Enter the code above'].forEach((t) => ol.append(el('li', '', t))); c.append(ol);
+  }
+  const row = el('div', 'row');
+  if (n.state === 'open') {
+    row.append(btn('Pause listening', '', err, () => api(`/portal/numbers/${n.id}/disconnect`, { method:'POST' })));
+    row.append(btn('Unlink', 'danger', err, async () => { if (confirm(`Unlink "${n.label}"? You will need to scan again.`)) await api(`/portal/numbers/${n.id}/unlink`, { method:'POST' }); }));
+  } else if (['idle', 'logged_out', 'replaced'].includes(n.state)) {
+    row.append(btn('Link with QR code', 'primary', err, () => api(`/portal/numbers/${n.id}/connect`, { method:'POST', body:{} })));
+  } else {
+    row.append(btn('Cancel', '', err, () => api(`/portal/numbers/${n.id}/disconnect`, { method:'POST' })));
+  }
+  row.append(btn('Rename', '', err, async () => { const v = prompt('Name for this number', n.label); if (v && v.trim()) await api(`/portal/numbers/${n.id}`, { method:'PUT', body:{ label: v.trim() } }); }));
+  if (n.state !== 'open') row.append(btn('Delete', 'danger', err, async () => {
+    if (confirm(`Delete "${n.label}"? Its saved messages stay, but the number is removed from this list.`)) await api(`/portal/numbers/${n.id}`, { method:'DELETE' }); }));
+  c.append(row);
+  if (n.state !== 'open') {
+    const ph = el('input', 'ph'); ph.inputMode = 'numeric'; ph.placeholder = 'Or link by pairing code: phone with country code, e.g. 919311855419';
+    ph.value = phoneDraft[n.id] || ''; ph.oninput = () => { phoneDraft[n.id] = ph.value; };
+    const r2 = el('div', 'row'); r2.append(btn('Get pairing code', '', err, () => api(`/portal/numbers/${n.id}/connect`, { method:'POST', body:{ phone: ph.value } })));
+    c.append(ph, r2);
+  }
+  c.append(err);
+  return c;
+}
+
+function render(data) {
+  const nums = data.numbers || [];
+  const box = $('numbers');
+  const typing = box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  const key = JSON.stringify(nums);
+  if (!(typing && key === lastKey)) { lastKey = key; const keep = typing ? document.activeElement.parentElement.dataset.id : null; box.replaceChildren(...nums.map(card)); if (keep) box.querySelector(`[data-id="${keep}"] input`)?.focus(); }
+  $('maxText').textContent = nums.length + ' of ' + data.max + ' numbers';
+  $('addCard').hidden = nums.length >= data.max;
+  const open = nums.filter((n) => n.state === 'open').length;
+  $('modeText').textContent = open + ' of ' + nums.length + ' connected. ' + (nums[0]?.writes_enabled ? 'Sending and group management are enabled for the admin API key.' : 'Listen-only: sending is disabled.');
+  loadStats(open > 0);
 }
 
 async function loadStats(open) {
@@ -128,16 +138,17 @@ async function loadStats(open) {
     c.hidden = false; c.textContent = g.count + ' groups visible · ' + msgs + ' messages stored'; } catch { c.hidden = true; }
 }
 
+$('addBtn').onclick = async () => {
+  $('addErr').textContent = '';
+  try { await api('/portal/numbers', { method:'POST', body:{ label: $('newLabel').value.trim() } }); $('newLabel').value = ''; }
+  catch (e) { $('addErr').textContent = e.message; }
+};
 $('loginBtn').onclick = async () => {
   $('loginErr').textContent = '';
   try { await api('/portal/login', { method:'POST', body:{ password: $('pw').value } }); $('pw').value=''; showDash(); }
   catch (e) { $('loginErr').textContent = e.message; }
 };
 $('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('loginBtn').click(); });
-$('pairBtn').onclick = async () => {
-  $('actErr').textContent = '';
-  try { await api('/portal/connect', { method:'POST', body:{ phone: $('phone').value } }); } catch (e) { $('actErr').textContent = e.message; }
-};
 $('logoutBtn').onclick = async () => { await api('/portal/logout', { method:'POST' }).catch(()=>{}); showLogin(); };
 
 api('/portal/me').then(showDash).catch(showLogin);

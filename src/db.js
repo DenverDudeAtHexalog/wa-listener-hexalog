@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { config } from './config.js';
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.dbPoolMax });
 pool.on('error', (e) => console.error('[db] idle client error', e.message));
 
 export const q = (text, params) => pool.query(text, params);
@@ -101,8 +101,66 @@ CREATE TABLE IF NOT EXISTS connection_log (
   state  text NOT NULL,
   detail text
 );
+
+-- ---- multiple numbers ------------------------------------------------------------------------------
+-- Every WhatsApp number we run is a row here. Existing single-number data becomes number 1.
+CREATE TABLE IF NOT EXISTS numbers (
+  id           serial PRIMARY KEY,
+  label        text NOT NULL,
+  phone        text UNIQUE,
+  auto_connect boolean NOT NULL DEFAULT true,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO numbers (id, label) SELECT 1, 'Number 1' WHERE NOT EXISTS (SELECT 1 FROM numbers);
+SELECT setval(pg_get_serial_sequence('numbers', 'id'), GREATEST((SELECT max(id) FROM numbers), 1));
+
+ALTER TABLE messages       ADD COLUMN IF NOT EXISTS number_id integer NOT NULL DEFAULT 1;
+-- When two of our numbers are in the same group, each stores a copy; only the first copy is the primary one
+-- (shown in lists and announced by webhooks).
+ALTER TABLE messages       ADD COLUMN IF NOT EXISTS primary_copy boolean NOT NULL DEFAULT true;
+ALTER TABLE wa_groups      ADD COLUMN IF NOT EXISTS number_id integer NOT NULL DEFAULT 1;
+ALTER TABLE actions_log    ADD COLUMN IF NOT EXISTS number_id integer NOT NULL DEFAULT 1;
+ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS number_id integer NOT NULL DEFAULT 1;
+
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_chat_jid_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS messages_number_chat_id_uq ON messages (number_id, chat_jid, id);
+CREATE INDEX IF NOT EXISTS messages_copy_idx ON messages (chat_jid, id);
+CREATE INDEX IF NOT EXISTS messages_primary_uid_idx ON messages (uid DESC) WHERE primary_copy;
+CREATE INDEX IF NOT EXISTS actions_log_number_idx ON actions_log (number_id, kind, ts DESC);
+
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'wa_groups'::regclass AND contype = 'p' AND array_length(conkey, 1) = 1) THEN
+    ALTER TABLE wa_groups DROP CONSTRAINT wa_groups_pkey;
+    ALTER TABLE wa_groups ADD PRIMARY KEY (number_id, jid);
+  END IF;
+END $$;
 `;
 
 export async function migrate() {
-  await q(SCHEMA);
+  // Several processes may start at once; serialise the schema change.
+  const c = await pool.connect();
+  try {
+    await c.query('SELECT pg_advisory_lock(727001)');
+    await c.query(SCHEMA);
+  } finally {
+    await c.query('SELECT pg_advisory_unlock(727001)').catch(() => {});
+    c.release();
+  }
+}
+
+/** Run fn inside a transaction holding an advisory lock for `key` (so two numbers don't both claim the same message). */
+export async function withLock(key, fn) {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+    const out = await fn(c);
+    await c.query('COMMIT');
+    return out;
+  } catch (e) {
+    await c.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    c.release();
+  }
 }

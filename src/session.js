@@ -8,18 +8,18 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from 'baileys';
-import { config } from './config.js';
+import { config, authDirFor } from './config.js';
 import { q } from './db.js';
 import { bus } from './bus.js';
 import { ingestMessage, upsertGroup } from './ingest.js';
 
 const logger = pino({ level: config.logLevel });
-const AUTH_DIR = path.join(config.dataDir, 'auth');
+const AUTH_DIR = authDirFor(config.numberId);
 
 /**
- * One WhatsApp number. States:
+ * One WhatsApp number (this process serves the number in config.numberId). States:
  *  idle -> connecting -> qr | pairing -> open ; open -> reconnecting -> open ; logged_out ; replaced
- * This service is read-only by design: it never calls sendMessage and never sends read receipts.
+ * It only sends when the API asks it to (see actions.js); it never sends read receipts by itself.
  */
 class WhatsAppSession {
   constructor() {
@@ -39,6 +39,7 @@ class WhatsAppSession {
 
   status() {
     return {
+      number_id: config.numberId,
       state: this.state,
       qr: this.qr,
       pairing_code: this.pairingCode,
@@ -53,8 +54,8 @@ class WhatsAppSession {
     this.state = state;
     if (state !== 'qr') this.qr = null;
     if (state !== 'pairing') this.pairingCode = null;
-    q('INSERT INTO connection_log (state, detail) VALUES ($1,$2)', [state, detail || null]).catch(() => {});
-    bus.emit('connection', this.status());
+    q('INSERT INTO connection_log (number_id, state, detail) VALUES ($1,$2,$3)', [config.numberId, state, detail || null]).catch(() => {});
+    bus.emit('session.state', this.status()); // the manager turns this into the public 'connection' event
   }
 
   async hasSavedLogin() {
@@ -130,6 +131,10 @@ class WhatsAppSession {
         this.pendingPhone = null;
         this.me = sock.user ? { jid: sock.user.id, name: sock.user.name || null } : null;
         this.setState('open');
+        if (this.me?.jid) {
+          const phone = this.me.jid.split(':')[0].split('@')[0];
+          q('UPDATE numbers SET phone = $2 WHERE id = $1', [config.numberId, phone]).catch(() => {}); // unique: ignore if another row has it
+        }
         this.#syncGroups(sock).catch((e) => logger.warn({ e: e.message }, 'group sync failed'));
       }
 
@@ -166,10 +171,10 @@ class WhatsAppSession {
 
     // --- Group metadata ----------------------------------------------------------------
     const refreshGroup = async (jid) => {
-      try { await upsertGroup(await sock.groupMetadata(jid)); bus.emit('group.updated', { jid }); }
+      try { await upsertGroup(await sock.groupMetadata(jid)); bus.emit('group.updated', { number_id: config.numberId, jid }); }
       catch (e) { logger.warn({ jid, e: e.message }, 'groupMetadata failed'); }
     };
-    sock.ev.on('groups.upsert', (gs) => gs.forEach((g) => upsertGroup(g).then(() => bus.emit('group.updated', { jid: g.id })).catch(() => {})));
+    sock.ev.on('groups.upsert', (gs) => gs.forEach((g) => upsertGroup(g).then(() => bus.emit('group.updated', { number_id: config.numberId, jid: g.id })).catch(() => {})));
     sock.ev.on('groups.update', (us) => us.forEach((u) => u.id && refreshGroup(u.id)));
     sock.ev.on('group-participants.update', (u) => u.id && refreshGroup(u.id));
   }
@@ -181,7 +186,7 @@ class WhatsAppSession {
   async #syncGroups(sock) {
     const all = await sock.groupFetchAllParticipating();
     for (const g of Object.values(all)) await upsertGroup(g);
-    bus.emit('group.updated', { count: Object.keys(all).length });
+    bus.emit('group.updated', { number_id: config.numberId, count: Object.keys(all).length });
   }
 
   #scheduleReconnect() {

@@ -53,6 +53,16 @@
   <div class="note">Keys are never shown on this page. Ask the CX tech owner for them and keep them out of front-end code and chat.</div>
 </section>
 
+<section class="doc" id="numbers-doc">
+  <h2>Several WhatsApp numbers</h2>
+  <p>The service can run many WhatsApp numbers at once, each as its own isolated login. One read key and one admin key cover all of them. <code>GET /api/numbers</code> lists them with their <code>id</code>, label, phone and state.</p>
+  <p><b>Reading:</b> by default you see every number together, and a message received by two numbers (both are in the same group) appears once. Add <code>?number=2</code> (id or phone) to see only that number. Message and group objects carry <code>number_id</code>.</p>
+  <p><b>Writing:</b> the server picks the number when it is obvious: the only one that is connected, the only one in that group, or the one that received the message you are reacting to or editing. When several could do it, you get HTTP 400 listing them; repeat the request with <code>"number": 2</code> in the body (id or phone). Responses include <code>"number"</code> so you know which one acted.</p>
+  <pre><code>curl -X POST "BASE/api/send/text" -H "x-api-key: $ADMIN_API_KEY" -H "content-type: application/json" \
+  -d '{"to":"1203630...@g.us","text":"Hello","number":2}'</code></pre>
+  <p>Limits and the audit log are counted per number. Live events and webhooks include <code>number_id</code>; connection events never include QR codes.</p>
+</section>
+
 <div id="sections"></div>
 
 <section class="doc" id="messages-obj">
@@ -102,10 +112,11 @@ curl -X POST "${BASE}/api/send/text" \\
 const R = 'read', W = 'admin';
 const S = [
  ['read', 'Read: groups and messages', 'Needs the read key.', [
-  ['GET','/api/status','Connection state and linked number'],
-  ['GET','/api/groups?search=','Groups the number is in, with last message time and message count'],
+  ['GET','/api/status','Connection state and linked number(s)'],
+  ['GET','/api/numbers','The WhatsApp numbers: id, label, phone, state'],
+  ['GET','/api/groups?search=&number=','Groups the numbers are in (number optional), with last message time and message count'],
   ['GET','/api/groups/:jid/messages','Messages of one group (URL-encode the jid)'],
-  ['GET','/api/messages','Messages across all groups'],
+  ['GET','/api/messages?number=','Messages across all groups (number optional)'],
   ['GET','/api/messages/:uid','One message, including reactions'],
   ['GET','/api/media/:uid','The file itself (image, video, document, voice note)'],
   ['PUT','/api/messages/:uid/transcript','Attach a transcript from your speech-to-text worker','{"transcript":"..."}'],
@@ -154,7 +165,7 @@ const S = [
 ];
 const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
 const out = document.getElementById('sections');
-const toc = [['start','Getting started']];
+const toc = [['start','Getting started'],['numbers-doc','Several numbers']];
 for (const [id, title, lead, eps] of S) {
   toc.push([id, title]);
   const sec = document.createElement('section'); sec.className = 'doc'; sec.id = id;

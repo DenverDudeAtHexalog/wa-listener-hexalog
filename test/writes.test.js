@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/walistener_test';
+process.env.WORKER_MODE = 'inline'; // run number 1 inside the test process
 process.env.API_KEY = 'read-key';
 process.env.ADMIN_API_KEY = 'admin-key';
 process.env.PORTAL_PASSWORD = 'pw';
@@ -17,9 +18,13 @@ const { migrate, q, pool } = await import('../src/db.js');
 const { config } = await import('../src/config.js');
 const { buildApp } = await import('../src/server.js');
 const { session } = await import('../src/session.js');
+const { bus } = await import('../src/bus.js');
+const setSession = (sock, state) => { session.sock = sock; session.state = state; bus.emit('session.state', session.status()); }; // a real session announces every change
 const { ingestMessage } = await import('../src/ingest.js');
 
 await migrate();
+const manager = await import('../src/manager.js');
+await manager.init();
 await q('TRUNCATE messages, reactions, wa_groups, webhooks, webhook_deliveries, actions_log RESTART IDENTITY CASCADE');
 
 // ---- fake socket ------------------------------------------------------------------------------------------
@@ -67,7 +72,7 @@ assert.equal((await call('POST', '/api/send/text', { to: '919800000001', text: '
 assert.equal((await fetch(`${base}/api/send/text?api_key=admin-key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401, 'admin key in URL is not accepted');
 assert.equal((await call('GET', '/api/groups', undefined, ADMIN)).status, 200, 'admin key can also read');
 assert.equal((await call('POST', '/api/send/text', { to: '919800000001', text: 'x' })).status, 503, 'not connected -> 503');
-session.sock = fakeSock; session.state = 'open';
+setSession(fakeSock, 'open');
 
 // ---- sending -----------------------------------------------------------------------------------------------------
 let r = await call('POST', '/api/send/text', { to: '+91 98000-00001', text: 'Hello @919800000002', mentions: ['919800000002'] });

@@ -7,13 +7,8 @@ import { bus } from './bus.js';
 import { session } from './session.js';
 import { ingestMessage, upsertGroup, chatOf } from './ingest.js';
 
-export class HttpError extends Error {
-  constructor(status, message, extra = {}) {
-    super(message);
-    this.status = status;
-    this.extra = extra;
-  }
-}
+import { HttpError } from './errors.js';
+export { HttpError };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (a, b) => a + Math.random() * Math.max(0, b - a);
@@ -46,7 +41,7 @@ const LIMITS = {
 async function checkQuota(kind, cost = 1) {
   const lim = LIMITS[kind];
   const { rows } = await q(
-    `SELECT COALESCE(SUM(cost),0) AS n FROM actions_log WHERE kind=$1 AND ok AND ts > now() - interval '${lim.window}'`, [kind]);
+    `SELECT COALESCE(SUM(cost),0) AS n FROM actions_log WHERE number_id=$2 AND kind=$1 AND ok AND ts > now() - interval '${lim.window}'`, [kind, config.numberId]);
   const used = Number(rows[0].n);
   if (used + cost > lim.max()) {
     throw new HttpError(429, `limit reached: at most ${lim.max()} ${lim.label} (used ${used}). This protects the number from being banned.`, { kind, used, limit: lim.max() });
@@ -55,8 +50,8 @@ async function checkQuota(kind, cost = 1) {
 
 async function log(kind, action, target, summary, ok, error, cost) {
   await q(
-    'INSERT INTO actions_log (kind, action, target, summary, ok, error, cost) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [kind, action, target || null, summary ? JSON.stringify(summary) : null, ok, error || null, ok ? cost : 0]
+    'INSERT INTO actions_log (number_id, kind, action, target, summary, ok, error, cost) VALUES ($8,$1,$2,$3,$4,$5,$6,$7)',
+    [kind, action, target || null, summary ? JSON.stringify(summary) : null, ok, error || null, ok ? cost : 0, config.numberId]
   ).catch((e) => console.error('[actions] log failed', e.message));
 }
 
@@ -124,10 +119,15 @@ async function verifyNumbers(sock, jids) {
   return jids.map((j) => found.get(j.split('@')[0]) || j);
 }
 
+/** The message with this uid, as THIS number stored it (another number may hold the primary copy). */
 async function messageRef(uid) {
-  const { rows } = await q('SELECT chat_jid, id, from_me, sender_jid, text FROM messages WHERE uid=$1', [uid]);
-  if (!rows[0]) throw new HttpError(404, 'message not found');
-  return rows[0];
+  const { rows } = await q(
+    `SELECT o.uid, o.chat_jid, o.id, o.from_me, o.sender_jid, o.text
+       FROM messages m JOIN messages o ON o.chat_jid = m.chat_jid AND o.id = m.id AND o.number_id = $2
+      WHERE m.uid = $1`, [uid, config.numberId]);
+  if (rows[0]) return rows[0];
+  const exists = await q('SELECT 1 FROM messages WHERE uid=$1', [uid]);
+  throw new HttpError(404, exists.rows[0] ? 'this number has no copy of that message (it is not in that chat)' : 'message not found');
 }
 
 const keyOf = (r) => ({
@@ -138,7 +138,7 @@ const keyOf = (r) => ({
 export async function refreshGroupMeta(sock, jid) {
   const meta = await sock.groupMetadata(jid);
   await upsertGroup(meta);
-  bus.emit('group.updated', { jid });
+  bus.emit('group.updated', { number_id: config.numberId, jid });
   return meta;
 }
 
@@ -165,7 +165,7 @@ async function rawSend(sock, jid, content, quoted) {
   await ingestMessage(sock, msg).catch(() => {});
   let uid = null;
   if (msg?.key?.id) {
-    const { rows } = await q('SELECT uid FROM messages WHERE chat_jid=$1 AND id=$2', [chatOf(msg.key), msg.key.id]);
+    const { rows } = await q('SELECT uid FROM messages WHERE number_id=$3 AND chat_jid=$1 AND id=$2', [chatOf(msg.key), msg.key.id, config.numberId]);
     uid = rows[0] ? Number(rows[0].uid) : null;
   }
   return { id: msg?.key?.id || null, uid, to: jid };
@@ -239,7 +239,7 @@ export async function editMessage(uid, body) {
   text(body, 'text', 8192);
   const out = await exec({ quota: 'send', action: 'edit', target: r.chat_jid, summary: { uid } },
     (sock) => rawSend(sock, r.chat_jid, { text: body, edit: keyOf(r) }));
-  await q('UPDATE messages SET text=$2, edited_at=now() WHERE uid=$1', [uid, body]);
+  await q('UPDATE messages SET text=$2, edited_at=now() WHERE uid=$1', [r.uid, body]);
   return out;
 }
 
@@ -247,7 +247,7 @@ export async function deleteMessage(uid) {
   const r = await messageRef(uid);
   const out = await exec({ quota: 'send', action: 'delete', target: r.chat_jid, summary: { uid } },
     (sock) => rawSend(sock, r.chat_jid, { delete: keyOf(r) }));
-  await q('UPDATE messages SET deleted=true WHERE uid=$1', [uid]);
+  await q('UPDATE messages SET deleted=true WHERE uid=$1', [r.uid]);
   return out;
 }
 
@@ -290,7 +290,7 @@ export async function createGroup({ subject, participants, verify = true }) {
       const members = verify ? await verifyNumbers(sock, jids) : jids;
       const meta = await sock.groupCreate(name, members);
       await upsertGroup(meta);
-      bus.emit('group.updated', { jid: meta.id });
+      bus.emit('group.updated', { number_id: config.numberId, jid: meta.id });
       await log('member_change', 'create_group_members', meta.id, { members: members.length }, true, null, members.length);
       return { jid: meta.id, subject: meta.subject, participants: (meta.participants || []).map((p) => ({ jid: p.phoneNumber || p.id, admin: p.admin || null })) };
     });
@@ -437,9 +437,4 @@ export function setProfilePicture(data_base64) {
 }
 export function removeProfilePicture() {
   return exec({ action: 'profile_picture_remove' }, async (sock) => { await sock.removeProfilePicture(sock.user.id); return { ok: true }; });
-}
-
-export async function recentActions(limit = 100) {
-  const { rows } = await q('SELECT id, ts, kind, action, target, summary, ok, error FROM actions_log ORDER BY id DESC LIMIT $1', [Math.min(500, Math.max(1, limit))]);
-  return { actions: rows };
 }

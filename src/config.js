@@ -6,6 +6,13 @@ const int = (v, d) => (v === undefined || v === '' ? d : parseInt(v, 10));
 export const config = {
   port: int(env.PORT, 3000),
   host: env.HOST || '0.0.0.0',
+  // Which WhatsApp number this process serves. The API process uses 1 only in inline mode; workers get NUMBER_ID from it.
+  numberId: int(env.NUMBER_ID, 1),
+  // 'fork' (default): one isolated worker process per number.  'inline': number 1 runs inside the API process (used by tests).
+  workerMode: env.WORKER_MODE === 'inline' ? 'inline' : 'fork',
+  workerMaxMb: int(env.WORKER_MAX_MB, 256),   // heap cap per worker process
+  maxNumbers: int(env.MAX_NUMBERS, 30),
+  dbPoolMax: int(env.DB_POOL_MAX, 10),
   databaseUrl: env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/walistener',
   dataDir: path.resolve(env.DATA_DIR || './data'),
   // Auth: API key for machine access, portal password for humans
@@ -48,3 +55,6 @@ export function assertConfig() {
     throw new Error('Invalid configuration: ' + problems.join('; '));
   }
 }
+
+/** Where one number's WhatsApp login keys live. */
+export const authDirFor = (id) => path.join(config.dataDir, 'auth', String(id));

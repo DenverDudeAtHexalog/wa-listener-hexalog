@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/walistener_test';
+process.env.WORKER_MODE = 'inline'; // run number 1 inside the test process
 process.env.API_KEY = 'test-key';
 process.env.PORTAL_PASSWORD = 'pw';
 process.env.MEDIA_MODE = 'store'; // first half of the test covers store mode; on-demand is tested below
@@ -18,6 +19,8 @@ const { ingestMessage, upsertGroup, _setDownloader } = await import('../src/inge
 const { startWebhookDispatcher, sign } = await import('../src/webhooks.js');
 
 await migrate();
+const manager = await import('../src/manager.js');
+await manager.init();
 await q('TRUNCATE messages, reactions, wa_groups, webhooks, webhook_deliveries RESTART IDENTITY CASCADE');
 
 const GROUP = '120363000000000001@g.us';
@@ -140,6 +143,8 @@ assert.ok(hs2.media.url && hs2.media.stored === false, 'history media is fetchab
 // ---- on-demand mode: nothing saved, file fetched from WhatsApp when opened -------------------------
 config.mediaMode = 'ondemand';
 const { session } = await import('../src/session.js');
+const { bus } = await import('../src/bus.js');
+const setSession = (sock, state) => { session.sock = sock; session.state = state; bus.emit('session.state', session.status()); }; // a real session announces every change
 await ingestMessage(fakeSock, mk('OD1', { documentMessage: { mimetype: 'application/pdf', fileName: 'order.pdf', fileLength: 8, directPath: '/v/t62/abc',
   mediaKey: Buffer.from('k'.repeat(32)), fileSha256: Buffer.from('s'.repeat(32)), fileEncSha256: Buffer.from('e'.repeat(32)) } }));
 const od = (await get(`/api/groups/${encodeURIComponent(GROUP)}/messages?type=document`)).messages.find((m) => m.id === 'OD1');
@@ -149,12 +154,12 @@ assert.equal(dbrow.media_path, null, 'no file written to disk');
 assert.equal(dbrow.media_ref.fields.directPath, '/v/t62/abc');
 
 // not connected -> 503
-session.sock = null; session.state = 'idle';
+setSession(null, 'idle');
 assert.equal((await fetch(`${base}/api/media/${od.uid}`, { headers: H })).status, 503);
 // connected -> downloaded from WhatsApp with the stored key
 let seen;
 _setDownloader(async (m) => { seen = m; return Buffer.from('PDFBYTES'); });
-session.sock = fakeSock; session.state = 'open';
+setSession(fakeSock, 'open');
 const ok = await fetch(`${base}/api/media/${od.uid}`, { headers: H });
 assert.equal(ok.status, 200); assert.equal(ok.headers.get('content-type'), 'application/pdf');
 assert.equal(Buffer.from(await ok.arrayBuffer()).toString(), 'PDFBYTES');
@@ -164,7 +169,7 @@ assert.equal(seen.key.id, 'OD1');
 _setDownloader(async () => { throw new Error('Request failed with status code 410'); });
 const gone = await fetch(`${base}/api/media/${od.uid}`, { headers: H });
 assert.equal(gone.status, 410); assert.match((await gone.json()).error, /no longer available/);
-session.sock = null; session.state = 'idle';
+setSession(null, 'idle');
 _setDownloader(async () => Buffer.from('OggS-fake-audio-bytes'));
 
 // history messages are stored but do not fire webhooks

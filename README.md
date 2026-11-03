@@ -1,11 +1,23 @@
 # WhatsApp Listener
 
-WhatsApp group listener built on Baileys. One number is linked once through a login portal; it then records every
+WhatsApp group listener built on Baileys. Each number is linked once through a login portal (add as many as you need); it then records every
 message in the groups it has been added to (text, images, video, documents, voice notes, replies, edits, deletes,
 reactions) and exposes them through a REST API, signed webhooks and a live event stream.
 
 By default it is listen-only. Set `ADMIN_API_KEY` to also let your systems send messages and manage groups
 through the API (see "Writing" below).
+
+## Several numbers
+
+Add numbers in the portal ("Add another WhatsApp number"), then link each by QR or pairing code. Every number runs in
+its own worker process (memory-capped, restarted automatically if it crashes), so one bad number cannot take down the
+others. Roughly 100 MB of RAM per connected number; size the server accordingly.
+
+- Reads cover all numbers; a message seen by two numbers is shown once. Add `?number=<id or phone>` to narrow.
+- Writes pick the number automatically when only one can do the job; otherwise the API answers 400 with the choices and
+  you repeat the call with `"number": <id or phone>`. `GET /api/numbers` lists them.
+- Settings: `MAX_NUMBERS`, `WORKER_MAX_MB`, `DB_POOL_MAX` (see `.env.example`). An existing single-number install is
+  migrated automatically: its login becomes number 1.
 
 ## Run it
 
@@ -47,6 +59,8 @@ spin down after 15 minutes, which would drop the WhatsApp connection.
 It cannot run on Vercel or other serverless platforms.
 
 ## API
+
+The full, always-current reference is served by the app itself at `/docs` (for example `https://wa-listener.hexalog.in/docs`). It is public and contains no keys. The portal is at `/`, styled to match the Hexalog site (`public/hexalog.css`).
 
 Send `x-api-key: <API_KEY>` (or `Authorization: Bearer <API_KEY>`, or `?api_key=` for media and event streams).
 

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { downloadMediaMessage, extractMessageContent, getContentType, isJidGroup } from 'baileys';
-import { q } from './db.js';
+import { q, withLock } from './db.js';
 import { config } from './config.js';
 import { bus } from './bus.js';
 
@@ -54,7 +54,7 @@ function senderOf(msg, key, chatJid) {
 async function lookupLidPhone(chatJid, lid) {
   const { rows } = await q(
     `SELECT p->>'jid' AS jid FROM wa_groups g, jsonb_array_elements(g.participants) p
-     WHERE g.jid = $1 AND p->>'lid' = $2 LIMIT 1`, [chatJid, lid]);
+     WHERE g.jid = $1 AND g.number_id = $3 AND p->>'lid' = $2 LIMIT 1`, [chatJid, lid, config.numberId]);
   const jid = rows[0]?.jid;
   return jid && jid.endsWith('@s.whatsapp.net') ? jid : null;
 }
@@ -182,6 +182,7 @@ export function publicRow(r) {
   const base = config.publicBaseUrl;
   return {
     uid: Number(r.uid),
+    number_id: r.number_id == null ? undefined : Number(r.number_id),
     id: r.id,
     chat_jid: r.chat_jid,
     group_name: r.group_name ?? undefined,
@@ -212,7 +213,7 @@ export function publicRow(r) {
   };
 }
 
-const withGroupName = `SELECT m.*, g.subject AS group_name FROM messages m LEFT JOIN wa_groups g ON g.jid = m.chat_jid`;
+const withGroupName = `SELECT m.*, g.subject AS group_name FROM messages m LEFT JOIN wa_groups g ON g.jid = m.chat_jid AND g.number_id = m.number_id`;
 
 export async function fetchMessageByUid(uid) {
   const { rows } = await q(`${withGroupName} WHERE m.uid = $1`, [uid]);
@@ -235,15 +236,16 @@ export async function ingestMessage(sock, msg, { fromHistory = false } = {}) {
     const targetId = proto.key?.id;
     if (proto.type === 0 && targetId) { // REVOKE
       const { rows } = await q(
-        `UPDATE messages SET deleted = true WHERE chat_jid=$1 AND id=$2 RETURNING uid`, [chat, targetId]);
-      if (rows[0] && !fromHistory) bus.emit('message.deleted', { chat_jid: chat, id: targetId, uid: Number(rows[0].uid) });
+        `UPDATE messages SET deleted = true WHERE number_id=$3 AND chat_jid=$1 AND id=$2 RETURNING uid, primary_copy`,
+        [chat, targetId, config.numberId]);
+      if (rows[0]?.primary_copy && !fromHistory) bus.emit('message.deleted', { number_id: config.numberId, chat_jid: chat, id: targetId, uid: Number(rows[0].uid) });
     } else if (proto.type === 14 && targetId) { // MESSAGE_EDIT
       const e = proto.editedMessage;
       const newText = e?.conversation || e?.extendedTextMessage?.text || null;
       const { rows } = await q(
-        `UPDATE messages SET text = COALESCE($3, text), edited_at = now() WHERE chat_jid=$1 AND id=$2 RETURNING uid`,
-        [chat, targetId, newText]);
-      if (rows[0] && !fromHistory) bus.emit('message.updated', await fetchMessageByUid(rows[0].uid));
+        `UPDATE messages SET text = COALESCE($3, text), edited_at = now() WHERE number_id=$4 AND chat_jid=$1 AND id=$2 RETURNING uid, primary_copy`,
+        [chat, targetId, newText, config.numberId]);
+      if (rows[0]?.primary_copy && !fromHistory) bus.emit('message.updated', await fetchMessageByUid(rows[0].uid));
     }
     return;
   }
@@ -254,15 +256,18 @@ export async function ingestMessage(sock, msg, { fromHistory = false } = {}) {
   if (parsed.reaction) {
     const r = parsed.reaction;
     if (!r.message_id) return;
+    let changed;
     if (!r.emoji) {
-      await q('DELETE FROM reactions WHERE chat_jid=$1 AND message_id=$2 AND reactor_jid=$3', [r.chat_jid, r.message_id, r.reactor_jid]);
+      changed = (await q('DELETE FROM reactions WHERE chat_jid=$1 AND message_id=$2 AND reactor_jid=$3 RETURNING 1', [r.chat_jid, r.message_id, r.reactor_jid])).rowCount > 0;
     } else {
-      await q(
+      changed = (await q(
         `INSERT INTO reactions (chat_jid, message_id, reactor_jid, emoji, ts) VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (chat_jid, message_id, reactor_jid) DO UPDATE SET emoji = EXCLUDED.emoji, ts = EXCLUDED.ts`,
-        [r.chat_jid, r.message_id, r.reactor_jid, r.emoji, r.ts]);
+         ON CONFLICT (chat_jid, message_id, reactor_jid) DO UPDATE SET emoji = EXCLUDED.emoji, ts = EXCLUDED.ts
+         WHERE reactions.emoji IS DISTINCT FROM EXCLUDED.emoji
+         RETURNING 1`,
+        [r.chat_jid, r.message_id, r.reactor_jid, r.emoji, r.ts])).rowCount > 0;
     }
-    if (!fromHistory) bus.emit('reaction', { ...r, timestamp: r.ts });
+    if (changed && !fromHistory) bus.emit('reaction', { number_id: config.numberId, ...r, timestamp: r.ts });
     return;
   }
 
@@ -279,20 +284,26 @@ export async function ingestMessage(sock, msg, { fromHistory = false } = {}) {
     media = { path: saved.path || null, size: saved.size ?? parsed.media.size, error: saved.error || null };
   }
 
-  const { rows } = await q(
-    `INSERT INTO messages
-       (id, chat_jid, sender_jid, sender_phone, sender_name, from_me, ts, type, text, quoted_id, mentions,
-        media_path, media_mime, media_size, media_filename, media_seconds, media_error, is_voice_note, from_history, media_ref)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-     ON CONFLICT (chat_jid, id) DO NOTHING
-     RETURNING uid`,
-    [parsed.id, parsed.chat_jid, parsed.sender_jid, parsed.sender_phone, parsed.sender_name, parsed.from_me,
-     parsed.ts, parsed.type, parsed.text, parsed.quoted_id, parsed.mentions ? JSON.stringify(stripNull(parsed.mentions)) : null,
-     media.path, parsed.media?.mime ?? null, media.size, parsed.media?.filename ?? null, parsed.media?.seconds ?? null,
-     media.error, parsed.is_voice_note, fromHistory, parsed.ref ? JSON.stringify(parsed.ref) : null]
-  );
-  if (!rows[0]) return; // duplicate
-  if (!fromHistory) bus.emit('message.created', await fetchMessageByUid(rows[0].uid));
+  // Two of our numbers can sit in the same group and both receive this message. The first one stored is the
+  // "primary" copy: it is what lists show and what webhooks announce. The lock stops both claiming primary at once.
+  const row = await withLock(`${parsed.chat_jid}:${parsed.id}`, async (c) => {
+    const { rows } = await c.query(
+      `INSERT INTO messages
+         (number_id, primary_copy, id, chat_jid, sender_jid, sender_phone, sender_name, from_me, ts, type, text, quoted_id, mentions,
+          media_path, media_mime, media_size, media_filename, media_seconds, media_error, is_voice_note, from_history, media_ref)
+       VALUES ($1, NOT EXISTS (SELECT 1 FROM messages o WHERE o.chat_jid=$3 AND o.id=$2 AND o.number_id <> $1),
+               $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+       ON CONFLICT (number_id, chat_jid, id) DO NOTHING
+       RETURNING uid, primary_copy`,
+      [config.numberId, parsed.id, parsed.chat_jid, parsed.sender_jid, parsed.sender_phone, parsed.sender_name, parsed.from_me,
+       parsed.ts, parsed.type, parsed.text, parsed.quoted_id, parsed.mentions ? JSON.stringify(stripNull(parsed.mentions)) : null,
+       media.path, parsed.media?.mime ?? null, media.size, parsed.media?.filename ?? null, parsed.media?.seconds ?? null,
+       media.error, parsed.is_voice_note, fromHistory, parsed.ref ? JSON.stringify(parsed.ref) : null]
+    );
+    return rows[0];
+  });
+  if (!row) return; // already stored by this number
+  if (row.primary_copy && !fromHistory) bus.emit('message.created', await fetchMessageByUid(row.uid));
 }
 
 export async function upsertGroup(meta) {
@@ -303,15 +314,15 @@ export async function upsertGroup(meta) {
     admin: p.admin || null,
   }));
   await q(
-    `INSERT INTO wa_groups (jid, subject, description, owner_jid, created_at_wa, participants, participant_count, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7, now())
-     ON CONFLICT (jid) DO UPDATE SET subject = COALESCE(EXCLUDED.subject, wa_groups.subject),
+    `INSERT INTO wa_groups (number_id, jid, subject, description, owner_jid, created_at_wa, participants, participant_count, updated_at)
+     VALUES ($8,$1,$2,$3,$4,$5,$6,$7, now())
+     ON CONFLICT (number_id, jid) DO UPDATE SET subject = COALESCE(EXCLUDED.subject, wa_groups.subject),
        description = COALESCE(EXCLUDED.description, wa_groups.description),
        owner_jid = COALESCE(EXCLUDED.owner_jid, wa_groups.owner_jid),
        participants = CASE WHEN jsonb_array_length(EXCLUDED.participants) > 0 THEN EXCLUDED.participants ELSE wa_groups.participants END,
        participant_count = CASE WHEN EXCLUDED.participant_count > 0 THEN EXCLUDED.participant_count ELSE wa_groups.participant_count END,
        updated_at = now()`,
     [meta.id, meta.subject || null, meta.desc || null, meta.ownerPn || meta.owner || null,
-     meta.creation ? new Date(meta.creation * 1000) : null, JSON.stringify(participants), participants.length]
+     meta.creation ? new Date(meta.creation * 1000) : null, JSON.stringify(participants), participants.length, config.numberId]
   );
 }

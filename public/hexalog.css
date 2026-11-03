@@ -27,7 +27,7 @@ a { color:var(--accent); }
 .bar { background:linear-gradient(120deg,var(--violet-900),var(--violet-700) 60%,var(--violet-600)); color:#fff; }
 .bar-in { max-width:1080px; margin:0 auto; padding:14px 20px; display:flex; align-items:center; gap:20px; }
 .logo { font-weight:800; letter-spacing:.14em; font-size:17px; color:#fff; text-decoration:none; display:flex; align-items:center; gap:10px; }
-.logo img { height:30px; width:auto; display:block; }
+.logo img { height:40px; width:auto; display:block; background:#fff; padding:6px 12px; border-radius:12px; }
 .logo img + .wm { display:none; }
 .bar nav { margin-left:auto; display:flex; gap:6px; }
 .bar nav a { color:#e9e1ff; text-decoration:none; padding:8px 14px; border-radius:999px; font-weight:600; font-size:14px; }
