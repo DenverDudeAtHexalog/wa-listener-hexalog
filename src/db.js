@@ -134,6 +134,48 @@ DO $$ BEGIN
     ALTER TABLE wa_groups ADD PRIMARY KEY (number_id, jid);
   END IF;
 END $$;
+
+-- ---- team inbox: people, who owns a chat, notes ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+  id            serial PRIMARY KEY,
+  username      text UNIQUE NOT NULL,
+  name          text NOT NULL,
+  role          text NOT NULL DEFAULT 'agent',   -- agent | admin
+  password_hash text NOT NULL,
+  active        boolean NOT NULL DEFAULT true,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS chat_state (
+  chat_jid    text PRIMARY KEY,
+  status      text NOT NULL DEFAULT 'open',      -- open | pending | resolved
+  assignee_id integer,
+  labels      text[] NOT NULL DEFAULT '{}',
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_by  text
+);
+CREATE TABLE IF NOT EXISTS chat_notes (
+  id         serial PRIMARY KEY,
+  chat_jid   text NOT NULL,
+  kind       text NOT NULL DEFAULT 'note',       -- note (written by a person) | event (assigned, resolved...)
+  user_name  text NOT NULL,
+  text       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_notes_chat_idx ON chat_notes (chat_jid, id);
+CREATE TABLE IF NOT EXISTS chat_reads (
+  user_key text NOT NULL,                        -- 'o' for the owner login, 'u<id>' for a person
+  chat_jid text NOT NULL,
+  last_uid bigint NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_key, chat_jid)
+);
+CREATE TABLE IF NOT EXISTS quick_replies (
+  id         serial PRIMARY KEY,
+  title      text NOT NULL,
+  body       text NOT NULL,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sent_by_name text;
 `;
 
 export async function migrate() {

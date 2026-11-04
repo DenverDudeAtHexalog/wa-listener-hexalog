@@ -9,10 +9,12 @@ import { bus } from './bus.js';
 import * as manager from './manager.js';
 import { HttpError } from './errors.js';
 import { publicRow } from './ingest.js';
-import { router as writesRouter, portalChat, BIG_BODY_ROUTE } from './writes.js';
+import { router as writesRouter, BIG_BODY_ROUTE } from './writes.js';
+import { router as chatRouter, initChat } from './chat.js';
+import { router as peopleRouter, loadPeople, loginUser } from './people.js';
 import { startWebhookDispatcher, ensureDefaultWebhook, WEBHOOK_EVENTS } from './webhooks.js';
 import {
-  checkPassword, makeCookie, clearCookie, requirePortal, requireApi, loginAllowed, recordLogin,
+  checkPassword, makeCookie, clearCookie, requirePortal, requirePortalAdmin, requireApi, loginAllowed, recordLogin, OWNER,
 } from './auth.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,23 +40,29 @@ export function buildApp() {
   // ---- Portal --------------------------------------------------------------------------
   app.use('/', express.static(path.join(here, '..', 'public'), { index: 'index.html', extensions: ['html'] }));
 
-  app.post('/portal/login', (req, res) => {
+  app.post('/portal/login', async (req, res) => {
     const ip = req.ip;
     if (!loginAllowed(ip)) return res.status(429).json({ error: 'too many attempts, wait a minute' });
-    const ok = checkPassword(req.body?.password);
-    recordLogin(ip, ok);
-    if (!ok) return res.status(401).json({ error: 'wrong password' });
-    res.setHeader('Set-Cookie', makeCookie(req.secure));
-    res.json({ ok: true });
+    const username = String(req.body?.username || '').trim().toLowerCase();
+    let who = null;
+    if (!username || username === 'owner') { if (checkPassword(req.body?.password)) who = OWNER; }
+    else {
+      const u = await loginUser(username, req.body?.password).catch(() => null);
+      if (u) who = { id: u.id, key: 'u' + u.id, name: u.name, role: u.role };
+    }
+    recordLogin(ip, !!who);
+    if (!who) return res.status(401).json({ error: username && username !== 'owner' ? 'wrong username or password' : 'wrong password' });
+    res.setHeader('Set-Cookie', makeCookie(req.secure, who));
+    res.json({ ok: true, user: { name: who.name, role: who.role } });
   });
   app.post('/portal/logout', (_req, res) => { res.setHeader('Set-Cookie', clearCookie()); res.json({ ok: true }); });
 
-  app.get('/portal/me', requirePortal, (_req, res) => res.json({ ok: true }));
+  app.get('/portal/me', requirePortal, (req, res) => res.json({ ok: true, user: { id: req.me.id, name: req.me.name, role: req.me.role } }));
   const portalNumbers = () => ({ numbers: manager.list({ secrets: true }), max: config.maxNumbers });
-  app.get('/portal/numbers', requirePortal, (_req, res) => res.json(portalNumbers()));
-  app.get('/portal/status', requirePortal, (_req, res) => res.json(portalNumbers()));
+  app.get('/portal/numbers', requirePortalAdmin, (_req, res) => res.json(portalNumbers()));
+  app.get('/portal/status', requirePortalAdmin, (_req, res) => res.json(portalNumbers()));
 
-  app.get('/portal/events', requirePortal, (req, res) => {
+  app.get('/portal/events', requirePortalAdmin, (req, res) => {
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.flushHeaders();
     const send = () => res.write(`data: ${JSON.stringify(portalNumbers())}\n\n`);
@@ -73,10 +81,10 @@ export function buildApp() {
     }
   };
   const nid = (req) => { const n = Number(req.params.id); if (!Number.isInteger(n)) throw new HttpError(400, 'bad number id'); return n; };
-  app.post('/portal/numbers', requirePortal, portal((req) => manager.addNumber(req.body?.label)));
-  app.put('/portal/numbers/:id', requirePortal, portal((req) => manager.renameNumber(nid(req), req.body?.label)));
-  app.delete('/portal/numbers/:id', requirePortal, portal(async (req) => { await manager.removeNumber(nid(req)); return { ok: true }; }));
-  app.post('/portal/numbers/:id/connect', requirePortal, portal(async (req) => {
+  app.post('/portal/numbers', requirePortalAdmin, portal((req) => manager.addNumber(req.body?.label)));
+  app.put('/portal/numbers/:id', requirePortalAdmin, portal((req) => manager.renameNumber(nid(req), req.body?.label)));
+  app.delete('/portal/numbers/:id', requirePortalAdmin, portal(async (req) => { await manager.removeNumber(nid(req)); return { ok: true }; }));
+  app.post('/portal/numbers/:id/connect', requirePortalAdmin, portal(async (req) => {
     const phone = req.body?.phone ? String(req.body.phone).replace(/\D/g, '') : null;
     if (req.body?.phone && (!phone || phone.length < 8 || phone.length > 15)) {
       throw new HttpError(400, 'phone must include country code, digits only (e.g. 919311855419)');
@@ -84,8 +92,8 @@ export function buildApp() {
     await manager.start(nid(req), { phone });
     return manager.get(nid(req), { secrets: true });
   }));
-  app.post('/portal/numbers/:id/disconnect', requirePortal, portal(async (req) => { await manager.stop(nid(req)); return manager.get(nid(req), { secrets: true }); }));
-  app.post('/portal/numbers/:id/unlink', requirePortal, portal(async (req) => { await manager.logout(nid(req)); return manager.get(nid(req), { secrets: true }); }));
+  app.post('/portal/numbers/:id/disconnect', requirePortalAdmin, portal(async (req) => { await manager.stop(nid(req)); return manager.get(nid(req), { secrets: true }); }));
+  app.post('/portal/numbers/:id/unlink', requirePortalAdmin, portal(async (req) => { await manager.logout(nid(req)); return manager.get(nid(req), { secrets: true }); }));
 
   // ---- API (API key or portal session) --------------------------------------------------
   const api = express.Router();
@@ -154,6 +162,12 @@ export function buildApp() {
       `SELECT m.*, g.subject AS group_name FROM messages m LEFT JOIN wa_groups g ON g.jid = m.chat_jid AND g.number_id = m.number_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY m.uid ${order} LIMIT ${limit}`, p);
     const out = rows.map(publicRow);
+    if (String(req.query.include || '').split(',').includes('reactions') && out.length) {
+      const { rows: rx } = await q(
+        `SELECT chat_jid, message_id, emoji, count(*)::int AS n FROM reactions WHERE message_id = ANY($1) AND chat_jid = ANY($2) AND emoji IS NOT NULL AND emoji <> '' GROUP BY 1,2,3`,
+        [out.map((m) => m.id), [...new Set(out.map((m) => m.chat_jid))]]);
+      for (const m of out) m.reactions = rx.filter((x) => x.chat_jid === m.chat_jid && x.message_id === m.id).map((x) => ({ emoji: x.emoji, count: x.n }));
+    }
     res.json({ count: out.length, next_after_uid: out.length ? Math.max(...out.map((m) => m.uid)) : null, messages: out });
   });
   api.get('/groups/:jid/messages', (req, res) => listMessages(req, res, req.params.jid));
@@ -257,7 +271,8 @@ export function buildApp() {
     res.json({ deliveries: rows });
   });
 
-  app.use('/portal/chat', portalChat);
+  app.use('/portal/chat', chatRouter);
+  app.use('/portal', peopleRouter);
   app.use('/api', writesRouter); // write actions (admin key); anything it does not handle falls through to the read API
   app.use('/api', api);
 
@@ -274,6 +289,8 @@ async function main() {
   assertConfig();
   fs.mkdirSync(config.dataDir, { recursive: true });
   await migrate();
+  await loadPeople();
+  initChat();
   await ensureDefaultWebhook();
   startWebhookDispatcher();
   const app = buildApp();

@@ -32,8 +32,10 @@
 
   <!-- Login -->
   <section id="login" class="card" hidden>
-    <label for="pw">Portal password</label>
-    <input id="pw" type="password" autocomplete="current-password" autofocus>
+    <label for="un">Username <span class="muted">(leave blank for the owner password)</span></label>
+    <input id="un" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus>
+    <label for="pw" style="margin-top:10px;display:block">Password</label>
+    <input id="pw" type="password" autocomplete="current-password">
     <div class="row"><button id="loginBtn" class="primary">Sign in</button></div>
     <div class="err" id="loginErr"></div>
   </section>
@@ -48,6 +50,19 @@
       <div class="err" id="addErr"></div>
     </div>
     <div class="card muted" id="statsCard" hidden></div>
+    <div class="card" id="teamCard">
+      <label>Team members</label>
+      <p class="muted" style="margin:4px 0 10px">People who answer chats sign in at the Chats screen with their own username. Agents can only use chats; admins can also manage numbers and people.</p>
+      <div id="people"></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">
+        <input id="tuName" placeholder="Full name" maxlength="60" style="flex:1;min-width:140px">
+        <input id="tuUser" placeholder="username" maxlength="30" autocapitalize="none" style="flex:1;min-width:120px">
+        <input id="tuPass" type="password" placeholder="password (8+ chars)" autocomplete="new-password" style="flex:1;min-width:140px">
+        <select id="tuRole" style="border-radius:999px;border:1px solid #ddd6f3;padding:0 12px;background:#fff;font:inherit"><option value="agent">Agent</option><option value="admin">Admin</option></select>
+        <button id="tuAdd" class="primary">Add person</button>
+      </div>
+      <div class="err" id="tuErr"></div>
+    </div>
     <div class="row" style="justify-content:space-between"><span class="muted" id="modeText"></span><span><a href="/docs" class="muted">API docs</a> &nbsp; <button id="logoutBtn">Sign out</button></span></div>
   </section>
 </main>
@@ -66,7 +81,35 @@ async function api(path, opts = {}) {
   return j;
 }
 function showLogin() { if (es) es.close(); $('login').hidden = false; $('dash').hidden = true; }
-function showDash() { $('login').hidden = true; $('dash').hidden = false; listen(); }
+function showDash(me) {
+  if (me?.user?.role === 'agent') { location.replace('/chat'); return; }
+  $('login').hidden = true; $('dash').hidden = false; listen(); loadPeople();
+}
+async function loadPeople() {
+  const box = $('people');
+  try {
+    const { users } = await api('/portal/users');
+    box.replaceChildren(...(users.length ? users : []).map((u) => {
+      const r = el('div', 'row'); r.style.cssText = 'align-items:center;gap:8px;margin:4px 0;flex-wrap:wrap';
+      const nm = el('span'); nm.style.flex = '1 1 100%'; nm.textContent = `${u.name} (${u.username}) · ${u.role}${u.active ? '' : ' · deactivated'}`;
+      if (!u.active) nm.style.opacity = '.6';
+      const e = el('div'); e.style.display = 'none';
+      r.append(nm,
+        btn(u.role === 'admin' ? 'Make agent' : 'Make admin', '', $('tuErr'), async () => { await api('/portal/users/' + u.id, { method:'PUT', body:{ role: u.role === 'admin' ? 'agent' : 'admin' } }); loadPeople(); }),
+        btn('Reset password', '', $('tuErr'), async () => { const v = prompt('New password for ' + u.name + ' (8+ characters)'); if (v) { await api('/portal/users/' + u.id, { method:'PUT', body:{ password: v } }); alert('Password changed.'); } }),
+        btn(u.active ? 'Deactivate' : 'Reactivate', u.active ? 'danger' : '', $('tuErr'), async () => { await api('/portal/users/' + u.id, { method:'PUT', body:{ active: !u.active } }); loadPeople(); }));
+      return r;
+    }));
+    if (!users.length) { const m = el('div', 'muted'); m.textContent = 'No team members yet.'; box.replaceChildren(m); }
+  } catch { box.replaceChildren(); }
+}
+$('tuAdd').onclick = async () => {
+  $('tuErr').textContent = '';
+  try {
+    await api('/portal/users', { method:'POST', body:{ name: $('tuName').value, username: $('tuUser').value, password: $('tuPass').value, role: $('tuRole').value } });
+    $('tuName').value = $('tuUser').value = $('tuPass').value = ''; loadPeople();
+  } catch (e) { $('tuErr').textContent = e.message; }
+};
 function listen() { if (es) es.close(); es = new EventSource('/portal/events'); es.onmessage = (e) => render(JSON.parse(e.data)); }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
@@ -145,7 +188,7 @@ $('addBtn').onclick = async () => {
 };
 $('loginBtn').onclick = async () => {
   $('loginErr').textContent = '';
-  try { await api('/portal/login', { method:'POST', body:{ password: $('pw').value } }); $('pw').value=''; showDash(); }
+  try { await api('/portal/login', { method:'POST', body:{ username: $('un').value, password: $('pw').value } }); $('pw').value=''; showDash(await api('/portal/me')); }
   catch (e) { $('loginErr').textContent = e.message; }
 };
 $('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('loginBtn').click(); });

@@ -190,6 +190,7 @@ export function publicRow(r) {
     sender_phone: r.sender_phone,
     sender_name: r.sender_name,
     from_me: r.from_me,
+    sent_by_name: r.sent_by_name ?? undefined,
     timestamp: r.ts,
     type: r.type,
     text: r.text,

@@ -5,7 +5,7 @@
 import express from 'express';
 import { config } from './config.js';
 import { q } from './db.js';
-import { requireAdmin, requirePortal } from './auth.js';
+import { requireAdmin } from './auth.js';
 import * as manager from './manager.js';
 import { recentActions } from './audit.js';
 
@@ -13,9 +13,9 @@ export const router = express.Router();
 
 // Routes that carry files need a bigger body limit than the rest of the API; they are parsed here, after auth.
 const bigJson = express.json({ limit: `${Math.ceil(config.maxMediaMb * 1.4) + 1}mb` });
-export const BIG_BODY_ROUTE = /^\/api\/(send\/media|groups\/[^/]+\/picture|profile\/picture)\/?$/;
+export const BIG_BODY_ROUTE = /^\/(api\/(send\/media|groups\/[^/]+\/picture|profile\/picture)|portal\/chat\/send-media)\/?$/;
 
-async function pickNumber(req, { uid, jid }) {
+export async function pickNumber(req, { uid, jid }) {
   const sel = req.body?.number ?? req.query.number;
   if (sel !== undefined && sel !== null && sel !== '') return manager.resolve(sel);
   if (uid) {
@@ -31,7 +31,7 @@ async function pickNumber(req, { uid, jid }) {
   return manager.resolve(undefined);
 }
 
-function fail(res, e) {
+export function fail(res, e) {
   if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, error: e.message, ...(e.extra || {}) });
   console.error('[writes]', e);
   return res.status(500).json({ ok: false, error: 'internal error' });
@@ -96,16 +96,3 @@ router.get('/actions', requireAdmin, async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-// ---- the chat screen in the portal: signed-in portal users can reply without holding the admin key.
-// Text only (with an optional reply to a message). Sending is still off unless ADMIN_API_KEY is set on the server.
-export const portalChat = express.Router();
-portalChat.post('/send', requirePortal, async (req, res) => {
-  if (!config.adminApiKey) return res.status(403).json({ ok: false, error: 'sending is disabled: set ADMIN_API_KEY on the server' });
-  try {
-    const b = req.body || {};
-    const replyUid = b.reply_to_uid ? Number(b.reply_to_uid) : null;
-    const id = await pickNumber(req, { uid: replyUid, jid: b.to });
-    const out = await manager.call(id, 'sendText', { to: b.to, text: b.text, reply_to_uid: replyUid || undefined });
-    res.json({ ok: true, number: id, ...out });
-  } catch (e) { fail(res, e); }
-});
