@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chats · Hexalog WhatsApp Listener</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/hexalog.css">
+<style>
+  html, body { height:100%; }
+  body { display:flex; flex-direction:column; overflow:hidden; }
+  .app { flex:1; min-height:0; display:flex; max-width:1280px; width:100%; margin:0 auto; background:var(--card); border-left:1px solid var(--line); border-right:1px solid var(--line); }
+  /* left: groups */
+  .side { width:360px; flex:none; display:flex; flex-direction:column; border-right:1px solid var(--line); min-height:0; }
+  .side-top { padding:12px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--line); }
+  .side-top input, .side-top select, .composer textarea, .composer select, .head input { font:inherit; padding:10px 12px; border:1.5px solid var(--line); border-radius:12px; background:transparent; color:var(--text); width:100%; }
+  select option { color:#1c0f45; }
+  .glist { flex:1; overflow-y:auto; }
+  .g { display:flex; gap:12px; padding:12px; cursor:pointer; border-bottom:1px solid var(--line); align-items:center; }
+  .g:hover { background:var(--lav-100); } .g.on { background:var(--lav-200); }
+  .av { width:44px; height:44px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-weight:800; color:#fff; font-size:16px; }
+  .g .mid { flex:1; min-width:0; } .g .name { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .g .sub { font-size:12px; color:var(--muted); } .badge { background:var(--accent); color:#fff; font-size:12px; font-weight:700; border-radius:999px; padding:2px 8px; }
+  /* right: conversation */
+  .main { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--lav-100); }
+  .head { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--card); border-bottom:1px solid var(--line); }
+  .head .t { font-weight:800; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .head input { width:200px; } .back { display:none; padding:8px 12px; }
+  .msgs { flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:6px; }
+  .empty { margin:auto; color:var(--muted); text-align:center; }
+  .day { align-self:center; font-size:12px; font-weight:600; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px; padding:3px 12px; margin:10px 0 4px; }
+  .b { max-width:min(640px,82%); padding:8px 12px 6px; border-radius:14px; background:var(--card); border:1px solid var(--line); align-self:flex-start; position:relative; word-wrap:break-word; }
+  .b.me { align-self:flex-end; background:var(--lav-200); }
+  .b .who { font-size:12.5px; font-weight:700; margin-bottom:2px; }
+  .b .txt { white-space:pre-wrap; } .b .txt.del { opacity:.55; text-decoration:line-through; }
+  .b .meta { font-size:11px; color:var(--muted); text-align:right; margin-top:2px; }
+  .b .rb { position:absolute; top:4px; right:6px; display:none; font-size:12px; padding:0 8px; border-radius:8px; background:var(--card); }
+  .b:hover .rb { display:block; }
+  .q { border-left:4px solid var(--accent); background:rgba(124,77,255,.1); border-radius:6px; padding:4px 8px; margin-bottom:4px; font-size:13px; color:var(--muted); }
+  .b img, .b video { max-width:100%; max-height:360px; border-radius:10px; display:block; margin-bottom:4px; }
+  .b audio { width:260px; max-width:100%; display:block; margin-bottom:4px; }
+  .more { align-self:center; font-size:13px; padding:6px 14px; }
+  .composer { background:var(--card); border-top:1px solid var(--line); padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+  .composer .row { display:flex; gap:8px; align-items:flex-end; } .composer textarea { resize:none; height:46px; max-height:140px; }
+  .composer select { width:auto; } .replybar { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); border-left:4px solid var(--accent); padding-left:8px; }
+  .replybar span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .err { color:var(--danger); font-size:13px; min-height:16px; }
+  @media (max-width:820px) {
+    .side { width:100%; border-right:none; } .main { display:none; }
+    .app.chat .side { display:none; } .app.chat .main { display:flex; } .back { display:block; } .head input { width:120px; }
+  }
+</style>
+</head>
+<body>
+<header class="bar"><div class="bar-in"><a class="logo" href="/"><img src="/hexalog-logo.webp" alt="Hexalog" onerror="this.remove()"><span class="wm">HEXALOG</span></a>
+  <nav><a href="/">Portal</a><a class="on" href="/chat">Chats</a><a href="/docs">API docs</a></nav></div></header>
+
+<div class="app" id="app">
+  <aside class="side">
+    <div class="side-top">
+      <input id="gsearch" placeholder="Search groups" autocomplete="off">
+      <select id="nfilter" hidden></select>
+    </div>
+    <div class="glist" id="glist"></div>
+  </aside>
+  <section class="main">
+    <div class="head"><button class="back" id="back">‹ Back</button><div class="t" id="title">Select a group</div><input id="msearch" placeholder="Search in this chat" hidden></div>
+    <div class="msgs" id="msgs"><div class="empty">Pick a group on the left to read its messages.</div></div>
+    <div class="composer" id="composer" hidden>
+      <div class="replybar" id="replybar" hidden><span id="replytext"></span><button id="replyx">×</button></div>
+      <div class="row">
+        <select id="sendas" hidden title="Send from which number"></select>
+        <textarea id="text" rows="1" placeholder="Type a reply (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button class="primary" id="send">Send</button>
+      </div>
+      <div class="err" id="err"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = ['#5b24d6', '#168a52', '#b26a00', '#c0362c', '#0a7ea4', '#a02c8c', '#6b6290', '#2f6f4f'];
+let groups = [], numbers = [], cur = null, msgs = [], hasMore = false, nfilter = '', replyTo = null, searching = false;
+const unread = {};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { method: opts.method || 'GET', headers: opts.body ? { 'content-type': 'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (r.status === 401) { location.href = '/'; throw new Error('login required'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+const nq = (p) => (nfilter ? (p.includes('?') ? '&' : '?') + 'number=' + encodeURIComponent(nfilter) : '');
+const color = (s) => COLORS[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+const initials = (s) => (String(s).match(/[A-Za-z0-9]/g) || ['#']).slice(0, 2).join('').toUpperCase();
+const hm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const dayLabel = (t) => { const d = new Date(t), n = new Date(); const same = (a, b) => a.toDateString() === b.toDateString(); const y = new Date(n); y.setDate(n.getDate() - 1);
+  return same(d, n) ? 'Today' : same(d, y) ? 'Yesterday' : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }); };
+const shortTime = (t) => { if (!t) return ''; const d = new Date(t), n = new Date(); return d.toDateString() === n.toDateString() ? hm(t) : d.toLocaleDateString([], { day: 'numeric', month: 'short' }); };
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+// ---------- groups
+async function loadNumbers() {
+  try { numbers = (await api('/api/numbers')).numbers; } catch { numbers = []; }
+  const s = $('nfilter');
+  s.hidden = numbers.length < 2;
+  s.replaceChildren(new Option('All numbers', ''), ...numbers.map((n) => new Option(n.label + (n.state === 'open' ? '' : ' (offline)'), String(n.id))));
+  s.value = nfilter;
+}
+async function loadGroups() {
+  const j = await api('/api/groups' + (nfilter ? '?number=' + encodeURIComponent(nfilter) : ''));
+  groups = j.groups.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
+  renderGroups();
+}
+function renderGroups() {
+  const f = $('gsearch').value.trim().toLowerCase(), box = $('glist');
+  box.replaceChildren(...groups.filter((g) => !f || (g.subject || g.jid).toLowerCase().includes(f)).map((g) => {
+    const name = g.subject || g.jid;
+    const d = el('div', 'g' + (cur && cur.jid === g.jid ? ' on' : ''));
+    const av = el('div', 'av', initials(name)); av.style.background = color(g.jid);
+    const mid = el('div', 'mid'); mid.append(el('div', 'name', name), el('div', 'sub', g.message_count + ' messages'));
+    const right = el('div'); right.style.textAlign = 'right'; right.append(el('div', 'sub', shortTime(g.last_message_at)));
+    if (unread[g.jid]) right.append(el('span', 'badge', String(unread[g.jid])));
+    d.append(av, mid, right); d.onclick = () => openGroup(g.jid); return d;
+  }));
+}
+
+// ---------- conversation
+async function openGroup(jid) {
+  cur = groups.find((g) => g.jid === jid) || { jid, subject: jid, numbers: [] };
+  unread[jid] = 0; replyTo = null; searching = false; $('msearch').value = '';
+  $('app').classList.add('chat'); $('title').textContent = cur.subject || jid; $('msearch').hidden = false; $('composer').hidden = false;
+  fillSendAs(); showReply(); renderGroups();
+  const j = await api(`/api/groups/${encodeURIComponent(jid)}/messages?limit=60` + nq('?x'));
+  msgs = j.messages.reverse(); hasMore = j.count >= 60; renderMsgs(true);
+}
+function fillSendAs() {
+  const s = $('sendas'); const ids = (cur.numbers || []).filter((id) => numbers.find((n) => n.id === id && n.state === 'open'));
+  s.hidden = ids.length < 2; s.replaceChildren(...ids.map((id) => new Option('Send as ' + (numbers.find((n) => n.id === id)?.label || id), String(id))));
+}
+function bubble(m) {
+  const b = el('div', 'b' + (m.from_me ? ' me' : '')); b.dataset.uid = m.uid;
+  if (!m.from_me) { const w = el('div', 'who', m.sender_name || (m.sender_phone ? '+' + m.sender_phone : 'Unknown')); w.style.color = color(m.sender_phone || m.sender_name || 'x'); b.append(w); }
+  else if (numbers.length > 1) b.append(el('div', 'who', 'You · ' + (numbers.find((n) => n.id === m.number_id)?.label || 'Number ' + m.number_id)));
+  if (m.quoted_id) { const qm = msgs.find((x) => x.id === m.quoted_id); b.append(el('div', 'q', qm ? ((qm.from_me ? 'You' : (qm.sender_name || '+' + qm.sender_phone)) + ': ' + (qm.text || '[' + qm.type + ']').slice(0, 120)) : 'Reply to an earlier message')); }
+  const med = m.media;
+  if (med && med.url) {
+    const u = '/api/media/' + m.uid, mime = med.mime || '';
+    if (m.type === 'image' || m.type === 'sticker' || mime.startsWith('image/')) { const i = el('img'); i.loading = 'lazy'; i.src = u; i.alt = m.type; b.append(i); }
+    else if (m.type === 'video' || mime.startsWith('video/')) { const v = el('video'); v.controls = true; v.preload = 'none'; v.src = u; b.append(v); }
+    else if (m.type === 'audio' || mime.startsWith('audio/')) { const a = el('audio'); a.controls = true; a.preload = 'none'; a.src = u; b.append(a); if (m.is_voice_note) b.append(el('div', 'sub', 'Voice note' + (med.seconds ? ' · ' + med.seconds + 's' : ''))); }
+    else { const a = el('a', '', '📎 ' + (med.filename || 'Download file')); a.href = u; a.target = '_blank'; b.append(a); }
+  } else if (med && med.error) b.append(el('div', 'sub', 'File unavailable'));
+  else if (!m.text && m.type && m.type !== 'text') b.append(el('div', 'sub', '[' + m.type + ']'));
+  if (m.text) b.append(el('div', 'txt' + (m.deleted ? ' del' : ''), m.text));
+  if (m.transcript) b.append(el('div', 'sub', 'Transcript: ' + m.transcript));
+  const meta = el('div', 'meta', (m.deleted ? 'deleted · ' : '') + (m.edited_at ? 'edited · ' : '') + hm(m.timestamp)); b.append(meta);
+  const rb = el('button', 'rb', 'Reply'); rb.onclick = () => { replyTo = m; showReply(); $('text').focus(); }; b.append(rb);
+  return b;
+}
+function renderMsgs(toBottom) {
+  const box = $('msgs'), keep = box.scrollHeight - box.scrollTop;
+  box.replaceChildren();
+  if (hasMore) { const bt = el('button', 'more', 'Load older messages'); bt.onclick = loadOlder; box.append(bt); }
+  if (!msgs.length) box.append(el('div', 'empty', searching ? 'No messages match.' : 'No messages yet.'));
+  let last = '';
+  for (const m of msgs) { const d = new Date(m.timestamp).toDateString(); if (d !== last) { box.append(el('div', 'day', dayLabel(m.timestamp))); last = d; } box.append(bubble(m)); }
+  box.scrollTop = toBottom ? box.scrollHeight : box.scrollHeight - keep;
+}
+async function loadOlder() {
+  if (!msgs.length || searching) return;
+  const j = await api(`/api/groups/${encodeURIComponent(cur.jid)}/messages?limit=60&before_uid=${msgs[0].uid}` + nq('?x'));
+  msgs = j.messages.reverse().concat(msgs); hasMore = j.count >= 60; renderMsgs(false);
+}
+async function refreshTail() {
+  if (!cur || searching || !msgs.length) return;
+  const j = await api(`/api/groups/${encodeURIComponent(cur.jid)}/messages?limit=100&after_uid=${msgs[msgs.length - 1].uid}` + nq('?x'));
+  addMsgs(j.messages);
+}
+function addMsgs(list) {
+  const box = $('msgs'), near = box.scrollHeight - box.scrollTop - box.clientHeight < 140; let changed = false;
+  for (const m of list) if (!msgs.some((x) => x.uid === m.uid)) { msgs.push(m); changed = true; }
+  if (changed) { msgs.sort((a, b) => a.uid - b.uid); renderMsgs(near); }
+}
+
+// ---------- reply
+function showReply() {
+  $('replybar').hidden = !replyTo;
+  if (replyTo) $('replytext').textContent = 'Replying to ' + (replyTo.from_me ? 'yourself' : (replyTo.sender_name || '+' + replyTo.sender_phone)) + ': ' + (replyTo.text || '[' + replyTo.type + ']');
+}
+async function send() {
+  const t = $('text').value.trim(); if (!t || !cur) return;
+  $('err').textContent = ''; $('send').disabled = true;
+  try {
+    const body = { to: cur.jid, text: t }; if (replyTo) body.reply_to_uid = replyTo.uid;
+    if (!$('sendas').hidden && $('sendas').value) body.number = $('sendas').value;
+    await api('/portal/chat/send', { method: 'POST', body });
+    $('text').value = ''; replyTo = null; showReply(); await refreshTail();
+  } catch (e) { $('err').textContent = e.message; }
+  $('send').disabled = false;
+}
+
+// ---------- live updates
+function live() {
+  const es = new EventSource('/api/stream' + (nfilter ? '?number=' + encodeURIComponent(nfilter) : ''));
+  window._es = es;
+  es.addEventListener('message.created', (e) => {
+    const m = JSON.parse(e.data); let g = groups.find((x) => x.jid === m.chat_jid);
+    if (!g) { loadGroups(); } else { g.last_message_at = m.timestamp; g.message_count++; groups.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0)); }
+    if (cur && m.chat_jid === cur.jid) { if (!searching) addMsgs([m]); } else if (!m.from_me) unread[m.chat_jid] = (unread[m.chat_jid] || 0) + 1;
+    renderGroups();
+  });
+  const upd = (e) => { const m = JSON.parse(e.data); const i = msgs.findIndex((x) => x.uid === m.uid); if (i >= 0) { msgs[i] = { ...msgs[i], ...m }; renderMsgs(false); } };
+  es.addEventListener('message.updated', upd); es.addEventListener('message.deleted', upd);
+  es.addEventListener('group.updated', () => loadGroups());
+  es.onerror = () => { /* EventSource reconnects by itself */ };
+  es.onopen = () => { refreshTail().catch(() => {}); };
+}
+
+// ---------- wiring
+$('gsearch').oninput = renderGroups;
+$('nfilter').onchange = async () => { nfilter = $('nfilter').value; if (window._es) window._es.close(); await loadGroups(); live(); if (cur) openGroup(cur.jid); };
+$('back').onclick = () => $('app').classList.remove('chat');
+$('replyx').onclick = () => { replyTo = null; showReply(); };
+$('send').onclick = send;
+$('text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+$('text').addEventListener('input', (e) => { e.target.style.height = '46px'; e.target.style.height = Math.min(140, e.target.scrollHeight) + 'px'; });
+$('msearch').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter' || !cur) return;
+  const v = $('msearch').value.trim();
+  if (!v) { searching = false; return openGroup(cur.jid); }
+  searching = true; hasMore = false;
+  const j = await api(`/api/groups/${encodeURIComponent(cur.jid)}/messages?limit=200&search=${encodeURIComponent(v)}` + nq('?x'));
+  msgs = j.messages.reverse(); renderMsgs(true);
+});
+
+(async () => { await loadNumbers(); await loadGroups(); live(); })().catch((e) => { $('msgs').replaceChildren(el('div', 'empty', 'Could not load: ' + e.message)); });
+</script>
+</body>
+</html>

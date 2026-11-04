@@ -5,7 +5,7 @@
 import express from 'express';
 import { config } from './config.js';
 import { q } from './db.js';
-import { requireAdmin } from './auth.js';
+import { requireAdmin, requirePortal } from './auth.js';
 import * as manager from './manager.js';
 import { recentActions } from './audit.js';
 
@@ -93,5 +93,19 @@ router.get('/actions', requireAdmin, async (req, res) => {
   try {
     const nid = req.query.number ? manager.resolve(req.query.number) : null;
     res.json({ ok: true, ...(await recentActions(parseInt(req.query.limit, 10) || 100, nid)) });
+  } catch (e) { fail(res, e); }
+});
+
+// ---- the chat screen in the portal: signed-in portal users can reply without holding the admin key.
+// Text only (with an optional reply to a message). Sending is still off unless ADMIN_API_KEY is set on the server.
+export const portalChat = express.Router();
+portalChat.post('/send', requirePortal, async (req, res) => {
+  if (!config.adminApiKey) return res.status(403).json({ ok: false, error: 'sending is disabled: set ADMIN_API_KEY on the server' });
+  try {
+    const b = req.body || {};
+    const replyUid = b.reply_to_uid ? Number(b.reply_to_uid) : null;
+    const id = await pickNumber(req, { uid: replyUid, jid: b.to });
+    const out = await manager.call(id, 'sendText', { to: b.to, text: b.text, reply_to_uid: replyUid || undefined });
+    res.json({ ok: true, number: id, ...out });
   } catch (e) { fail(res, e); }
 });

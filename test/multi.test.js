@@ -123,9 +123,21 @@ assert.equal(r.status, 200); assert.equal(r.body.number, 2, 'the only number in 
 r = await call('POST', '/api/send/text', { to: '919800000009', text: 'dm' });
 assert.equal(r.status, 400, 'a direct message with no number named is ambiguous');
 
+// ---- chat screen: portal users can reply without the admin key ---------------------------------------------------
+const noLogin = await call('POST', '/portal/chat/send', { to: SHARED, text: 'x', number: 1 }, { 'content-type': 'application/json' });
+assert.equal(noLogin.status, 401, 'the chat send route needs the portal login');
+const login = await fetch(base + '/portal/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'pw' }) });
+const PC = { cookie: login.headers.get('set-cookie').split(';')[0], 'content-type': 'application/json' };
+r = await call('POST', '/portal/chat/send', { to: SHARED, text: 'from the chat screen', number: 1 }, PC);
+assert.equal(r.status, 200); assert.equal(r.body.number, 1);
+r = await call('POST', '/portal/chat/send', { to: SHARED, text: 'which number?' }, PC);
+assert.equal(r.status, 400, 'ambiguous without a number, same rule as the API');
+assert.equal((await call('GET', '/api/groups', undefined, PC)).status, 200, 'portal session can read the API');
+assert.equal((await fetch(base + '/chat')).status, 200, 'chat page is served');
+
 const c1 = (await manager._request(1, { t: 'calls' })).filter(([n]) => n === 'sendMessage').map((c) => c[2].text);
 const c2 = (await manager._request(2, { t: 'calls' })).filter(([n]) => n === 'sendMessage').map((c) => c[2].text);
-assert.deepEqual(c1, ['by phone']); assert.deepEqual(c2, ['from delhi', 'only delhi is in here']);
+assert.deepEqual(c1, ['by phone', 'from the chat screen']); assert.deepEqual(c2, ['from delhi', 'only delhi is in here']);
 
 // acting on a message goes to the number that holds it
 const m2uid = (await get('/api/messages?number=2')).body.messages.find((m) => m.id === 'M2').uid;
@@ -133,7 +145,7 @@ r = await call('POST', `/api/messages/${m2uid}/react`, { emoji: '👍' });
 assert.equal(r.status, 200); assert.equal(r.body.number, 2, 'react uses the number that received the message');
 
 // ---- quotas are per number ----------------------------------------------------------------------------------------
-// number 1 has sent 1 message so far, number 2 has sent 3 (2 texts + 1 reaction); the limit is 3 per hour each
+// number 1 has sent 2 messages so far, number 2 has sent 3 (2 texts + 1 reaction); the limit is 3 per hour each
 r = await call('POST', '/api/send/text', { to: SHARED, text: 'x', number: 2 });
 assert.equal(r.status, 429, 'number 2 is at its limit');
 r = await call('POST', '/api/send/text', { to: SHARED, text: 'still fine', number: 1 });

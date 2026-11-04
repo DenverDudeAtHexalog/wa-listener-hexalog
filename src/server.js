@@ -9,7 +9,7 @@ import { bus } from './bus.js';
 import * as manager from './manager.js';
 import { HttpError } from './errors.js';
 import { publicRow } from './ingest.js';
-import { router as writesRouter, BIG_BODY_ROUTE } from './writes.js';
+import { router as writesRouter, portalChat, BIG_BODY_ROUTE } from './writes.js';
 import { startWebhookDispatcher, ensureDefaultWebhook, WEBHOOK_EVENTS } from './webhooks.js';
 import {
   checkPassword, makeCookie, clearCookie, requirePortal, requireApi, loginAllowed, recordLogin,
@@ -257,6 +257,7 @@ export function buildApp() {
     res.json({ deliveries: rows });
   });
 
+  app.use('/portal/chat', portalChat);
   app.use('/api', writesRouter); // write actions (admin key); anything it does not handle falls through to the read API
   app.use('/api', api);
 
