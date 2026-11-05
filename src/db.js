@@ -176,6 +176,22 @@ CREATE TABLE IF NOT EXISTS quick_replies (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sent_by_name text;
+-- Every chat we have seen a message in (groups and 1:1), so the chat list does not have to scan all messages.
+CREATE TABLE IF NOT EXISTS chat_known (
+  chat_jid   text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO chat_known (chat_jid) SELECT DISTINCT chat_jid FROM messages WHERE NOT EXISTS (SELECT 1 FROM chat_known) ON CONFLICT DO NOTHING;
+CREATE INDEX IF NOT EXISTS messages_chat_uid_idx ON messages (chat_jid, uid DESC);
+-- Names WhatsApp gives us for people (saved contact name, or the name they set for themselves).
+CREATE TABLE IF NOT EXISTS contacts (
+  number_id  integer NOT NULL DEFAULT 1,
+  jid        text NOT NULL,
+  name       text,
+  notify     text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (number_id, jid)
+);
 `;
 
 export async function migrate() {

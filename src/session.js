@@ -11,7 +11,7 @@ import makeWASocket, {
 import { config, authDirFor } from './config.js';
 import { q } from './db.js';
 import { bus } from './bus.js';
-import { ingestMessage, upsertGroup } from './ingest.js';
+import { ingestMessage, upsertGroup, upsertContacts } from './ingest.js';
 
 const logger = pino({ level: config.logLevel });
 const AUTH_DIR = authDirFor(config.numberId);
@@ -164,8 +164,12 @@ class WhatsAppSession {
       for (const m of messages) this.#queue(() => ingestMessage(sock, m));
     });
 
-    sock.ev.on('messaging-history.set', ({ messages }) => {
-      if (gen !== this.generation || !config.ingestHistory) return;
+    sock.ev.on('contacts.upsert', (cs) => { if (gen === this.generation) upsertContacts(cs).catch(() => {}); });
+    sock.ev.on('contacts.update', (cs) => { if (gen === this.generation) upsertContacts(cs).catch(() => {}); });
+    sock.ev.on('messaging-history.set', ({ messages, contacts }) => {
+      if (gen !== this.generation) return;
+      if (contacts?.length) upsertContacts(contacts).catch(() => {});
+      if (!config.ingestHistory) return;
       for (const m of messages || []) this.#queue(() => ingestMessage(sock, m, { fromHistory: true }));
     });
 

@@ -25,7 +25,7 @@ export const config = {
   // 'store': also save every file on this server's disk (needs disk space; files survive WhatsApp expiring them).
   mediaMode: env.MEDIA_MODE === 'store' ? 'store' : 'ondemand',
   maxMediaMb: int(env.MAX_MEDIA_MB, 50),
-  includeDirectChats: env.INCLUDE_DIRECT_CHATS === 'true',
+  includeDirectChats: env.INCLUDE_DIRECT_CHATS !== 'false', // 1:1 chats are stored too; set INCLUDE_DIRECT_CHATS=false to listen to groups only
   ingestHistory: env.INGEST_HISTORY !== 'false',
   autoConnect: env.AUTO_CONNECT !== 'false',
   logLevel: env.LOG_LEVEL || 'warn',

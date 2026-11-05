@@ -74,7 +74,8 @@ await ingestMessage(fakeSock, mk('A1', { audioMessage: { mimetype: 'audio/ogg; c
 await ingestMessage(fakeSock, mk('D1', { documentWithCaptionMessage: { message: { documentMessage: { mimetype: 'application/pdf', fileName: 'invoice.pdf', caption: 'Invoice attached', fileLength: 21 } } } }));
 await ingestMessage(fakeSock, mk('I1', { imageMessage: { mimetype: 'image/jpeg', caption: 'damaged box', fileLength: 21 } }));
 await ingestMessage(fakeSock, mk('R1', { extendedTextMessage: { text: 'checking', contextInfo: { stanzaId: 'T1' } } }));
-// duplicate + status broadcast + direct chat (ignored by default)
+// duplicate + status broadcast + direct chat (ignored when INCLUDE_DIRECT_CHATS=false)
+const { config: cfg0 } = await import('../src/config.js'); cfg0.includeDirectChats = false;
 await ingestMessage(fakeSock, mk('T1', { conversation: 'dup' }));
 await ingestMessage(fakeSock, { key: { remoteJid: 'status@broadcast', id: 'S1' }, message: { conversation: 'status' } });
 await ingestMessage(fakeSock, { key: { remoteJid: '919800000009@s.whatsapp.net', id: 'DM1' }, message: { conversation: 'hi' } });

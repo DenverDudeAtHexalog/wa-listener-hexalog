@@ -303,8 +303,22 @@ export async function ingestMessage(sock, msg, { fromHistory = false } = {}) {
     );
     return rows[0];
   });
+  q('INSERT INTO chat_known (chat_jid) VALUES ($1) ON CONFLICT DO NOTHING', [parsed.chat_jid]).catch(() => {});
   if (!row) return; // already stored by this number
   if (row.primary_copy && !fromHistory) bus.emit('message.created', await fetchMessageByUid(row.uid));
+}
+
+/** Remember names WhatsApp tells us about people (contacts.upsert / contacts.update / history sync). */
+export async function upsertContacts(list) {
+  for (const c of list || []) {
+    const jid = c?.phoneNumber || c?.id; if (!jid || jid.endsWith('@g.us') || jid.endsWith('@broadcast')) continue;
+    const name = c.name || c.verifiedName || null, notify = c.notify || null;
+    if (!name && !notify) continue;
+    await q(
+      `INSERT INTO contacts (number_id, jid, name, notify) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (number_id, jid) DO UPDATE SET name = COALESCE(EXCLUDED.name, contacts.name), notify = COALESCE(EXCLUDED.notify, contacts.notify), updated_at = now()`,
+      [config.numberId, jid, name, notify]);
+  }
 }
 
 export async function upsertGroup(meta) {

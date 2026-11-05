@@ -88,6 +88,16 @@
   .modal .card { max-width:520px; width:100%; margin:0; max-height:90vh; overflow:auto; }
   .stat { display:flex; gap:12px; flex-wrap:wrap; margin:10px 0; } .stat div { flex:1; min-width:120px; background:var(--lav-100); border-radius:14px; padding:12px; } .stat b { display:block; font-size:24px; }
   table.t { width:100%; border-collapse:collapse; font-size:14px; } table.t td, table.t th { padding:6px 4px; border-bottom:1px solid var(--line); text-align:left; }
+  .av.grp { border-radius:14px; }
+  .toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#1c0f45; color:#fff; padding:10px 16px; border-radius:12px; font-size:14px; z-index:90; max-width:90vw; box-shadow:0 8px 24px rgba(0,0,0,.3); }
+  .offline { background:#fde8e6; color:#7a1c14; padding:6px 16px; font-size:13px; text-align:center; border-bottom:1px solid #f3b9b3; }
+  .newbtns { display:flex; gap:8px; } .newbtns button { flex:1; }
+  .tabs2 { display:flex; gap:6px; } .tabs2 button { padding:4px 12px; font-size:13px; border-radius:999px; } .tabs2 button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .pane { flex:1; overflow-y:auto; min-height:0; display:flex; flex-direction:column; }
+  .mem { display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid var(--line); font-size:14px; } .mem .who { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .frm { display:flex; flex-direction:column; gap:10px; margin-top:12px; } .frm label { font-size:13px; font-weight:700; color:var(--muted); display:block; margin-bottom:4px; }
+  .hint { font-size:12px; color:var(--muted); }
+  .skel { align-self:center; margin:auto; color:var(--muted); }
   .back { display:none; }
   @media (max-width:980px) { .panel { position:absolute; right:0; top:0; bottom:0; z-index:20; box-shadow:-8px 0 24px rgba(0,0,0,.2); } .body { position:relative; } }
   @media (max-width:820px) {
@@ -100,20 +110,22 @@
 <header class="bar"><div class="bar-in"><a class="logo" href="/"><img src="/hexalog-logo.webp" alt="Hexalog" onerror="this.remove()"><span class="wm">HEXALOG</span></a>
   <nav><a class="on" href="/chat">Chats</a><a id="navPortal" href="/" hidden>Portal</a><a href="/docs">API docs</a><a href="#" id="meBtn" class="me"></a></nav></div></header>
 <div class="banner" id="banner" hidden></div>
+<div class="offline" id="offline" hidden>Connection lost. Trying to reconnect&hellip; new messages may be delayed.</div>
 
 <div class="app" id="app">
   <aside class="side">
     <div class="side-top">
+      <div class="newbtns" id="newbtns"><button class="sm primary" id="newChat">+ New chat</button><button class="sm" id="newGroup">+ New group</button></div>
       <div class="tabs" id="tabs"></div>
       <input id="gsearch" placeholder="Search chats or labels" autocomplete="off">
-      <div class="row2"><select id="sfilter"><option value="active">Open and pending</option><option value="resolved">Resolved</option><option value="all">All statuses</option></select><select id="nfilter" hidden></select></div>
+      <div class="row2"><select id="kfilter" title="Type"><option value="all">All types</option><option value="group">Groups</option><option value="dm">Direct</option></select><select id="sfilter"><option value="active">Not resolved</option><option value="resolved">Resolved</option><option value="all">Any status</option></select><select id="nfilter" hidden></select></div>
     </div>
     <div class="glist" id="glist"></div>
   </aside>
   <section class="main">
     <div class="head" id="head" hidden>
-      <div class="l1"><button class="back sm" id="back">‹ Back</button><div class="t" id="title"></div>
-        <input id="msearch" placeholder="Search in chat" style="width:170px"><button class="sm" id="notesBtn">Notes</button></div>
+      <div class="l1"><button class="back sm" id="back">‹ Back</button><div class="t"><span id="title"></span><span class="sub" id="subtitle" style="font-weight:400;margin-left:8px"></span></div>
+        <input id="msearch" placeholder="Search in chat" style="width:170px"><button class="sm" id="infoBtn">Info</button><button class="sm" id="notesBtn">Notes</button></div>
       <div class="l2"><select id="status" title="Status"><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option></select>
         <select id="assignee" title="Owner"></select><div class="labels" id="labels"></div></div>
     </div>
@@ -135,10 +147,13 @@
         </div>
       </div>
       <aside class="panel" id="panel" hidden>
-        <h4>Team notes <button class="sm" id="panelx">×</button></h4>
-        <div class="muted" style="padding:8px 14px 0;font-size:12px">Only your team sees these. They are never sent to WhatsApp.</div>
-        <div class="notes" id="notes"></div>
-        <div class="add"><textarea id="noteText" rows="2" placeholder="Write a note for the team"></textarea><button class="primary sm" id="noteAdd">Add note</button></div>
+        <h4><span class="tabs2"><button id="tabNotes" class="on">Notes</button><button id="tabInfo">Info</button></span> <button class="sm" id="panelx">×</button></h4>
+        <div class="pane" id="notesPane">
+          <div class="muted" style="padding:8px 14px 0;font-size:12px">Only your team sees these. They are never sent to WhatsApp.</div>
+          <div class="notes" id="notes"></div>
+          <div class="add"><textarea id="noteText" rows="2" placeholder="Write a note for the team"></textarea><button class="primary sm" id="noteAdd">Add note</button></div>
+        </div>
+        <div class="pane" id="infoPane" hidden></div>
       </aside>
     </div>
   </section>
@@ -148,17 +163,15 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#5b24d6', '#168a52', '#b26a00', '#c0362c', '#0a7ea4', '#a02c8c', '#6b6290', '#2f6f4f'];
-const S = { me: null, writes: true, chats: [], users: [], numbers: [], quick: [], cur: null, msgs: [], hasMore: false, searching: false, notes: [], tab: 'all', status: 'active', nf: '', q: '', replyTo: null, attach: null, panel: false };
+const S = {
+  me: null, writes: true, chats: [], users: [], numbers: [], quick: [], cur: null, msgs: [], hasMore: false, searching: false, loading: false, loadErr: '',
+  notes: [], tab: 'all', status: 'active', kind: 'all', nf: '', q: '', replyTo: null, attach: null, panel: false, panelTab: 'notes',
+  drafts: {}, openTok: 0, stick: true, live: false, sending: false,
+};
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
-async function api(path, opts = {}) {
-  const r = await fetch(path, { method: opts.method || 'GET', headers: opts.body ? { 'content-type': 'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  if (r.status === 401) { location.href = '/'; throw new Error('login required'); }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-  return j;
-}
+// ---------- small helpers
 function h(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 const color = (s) => COLORS[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
 const initials = (s) => (String(s).match(/[A-Za-z0-9]/g) || ['#']).slice(0, 2).join('').toUpperCase();
@@ -168,8 +181,37 @@ const dayLabel = (t) => { const d = new Date(t), n = new Date(), y = new Date(n)
 const shortTime = (t) => { if (!t) return ''; const d = new Date(t); return d.toDateString() === new Date().toDateString() ? hm(t) : d.toLocaleDateString([], { day: 'numeric', month: 'short' }); };
 const mins = (m) => (m == null ? '–' : m < 60 ? Math.round(m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + Math.round(m % 60) + 'm' : Math.floor(m / 1440) + 'd');
 const ago = (t) => (Date.now() - new Date(t).getTime()) / 60000;
-const preview = (c) => { if (!c.last_ts) return 'No messages yet'; const body = c.last_deleted ? 'deleted message' : (c.last_text || '[' + (c.last_type || 'message') + ']'); return (c.last_from_me ? 'You: ' : c.last_sender ? c.last_sender + ': ' : '') + body; };
+const nameOf = (c) => c.subject || (c.phone ? '+' + c.phone : c.jid);
+const preview = (c) => { if (!c.last_ts) return 'No messages yet'; const body = c.last_deleted ? 'deleted message' : (c.last_text || '[' + (c.last_type || 'message') + ']'); return (c.last_from_me ? 'You: ' : c.is_group && c.last_sender ? c.last_sender + ': ' : '') + body; };
 const canWrite = () => S.writes;
+const numLabel = (id) => S.numbers.find((n) => n.id === id)?.label || ('#' + id);
+
+let toastTimer;
+function toast(msg) {
+  let t = document.querySelector('.toast'); if (!t) { t = h('div', 'toast'); document.body.append(t); }
+  t.textContent = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 5000);
+}
+window.addEventListener('unhandledrejection', (e) => { e.preventDefault(); const m = e.reason && e.reason.message; if (m && !/login required/.test(m)) toast(m); });
+window.addEventListener('error', (e) => { console.error(e.error || e.message); });
+
+async function api(path, opts = {}) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), opts.timeout || 30000);
+  let r;
+  try { r = await fetch(path, { method: opts.method || 'GET', headers: opts.body ? { 'content-type': 'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined, signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'The server took too long to answer. Try again.' : 'Could not reach the server. Check your connection.'); }
+  finally { clearTimeout(timer); }
+  if (r.status === 401) { location.href = '/'; throw new Error('login required'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('Something went wrong (HTTP ' + r.status + ')'));
+  return j;
+}
+
+/** Make `box` hold exactly `nodes`, in order, touching only what changed (so playing audio, loaded images and scroll positions survive). */
+function reconcile(box, nodes) {
+  let ref = box.firstChild;
+  for (const n of nodes) { if (n === ref) ref = ref.nextSibling; else box.insertBefore(n, ref); }
+  while (ref) { const nx = ref.nextSibling; ref.remove(); ref = nx; }
+}
 
 // ---------- sound + desktop alerts
 let actx;
@@ -179,60 +221,101 @@ function notify(chat, m) {
   if (!alertsOn()) return;
   if (document.visibilityState === 'visible' && S.cur && S.cur.jid === m.chat_jid) return;
   beep();
-  try { const n = new Notification(chat ? (chat.subject || chat.jid) : 'New message', { body: (m.sender_name || '') + ': ' + (m.text || '[' + m.type + ']'), tag: m.chat_jid }); n.onclick = () => { window.focus(); openChat(m.chat_jid); n.close(); }; } catch {}
+  try { const n = new Notification(chat ? nameOf(chat) : 'New message', { body: (m.sender_name || '') + (m.sender_name ? ': ' : '') + (m.text || '[' + m.type + ']'), tag: m.chat_jid }); n.onclick = () => { window.focus(); openChat(m.chat_jid); n.close(); }; } catch {}
 }
 function updateTitle() { const n = S.chats.reduce((a, c) => a + (c.unread || 0), 0); document.title = (n ? '(' + n + ') ' : '') + 'Chats · Hexalog WhatsApp Listener'; }
 
 // ---------- chat list
-async function loadChats() { S.chats = (await api('/portal/chat/chats' + (S.nf ? '?number=' + encodeURIComponent(S.nf) : ''))).chats; renderTabs(); renderChats(); }
-const sortChats = () => S.chats.sort((a, b) => new Date(b.last_ts || 0) - new Date(a.last_ts || 0));
+let loadSeq = 0, loadTimer = null;
+function scheduleChats(ms = 350) { clearTimeout(loadTimer); loadTimer = setTimeout(() => loadChats().catch(() => {}), ms); }
+async function loadChats() {
+  const seq = ++loadSeq;
+  const j = await api('/portal/chat/chats' + (S.nf ? '?number=' + encodeURIComponent(S.nf) : ''));
+  if (seq !== loadSeq) return;                       // a newer request is already on its way
+  const stubs = S.chats.filter((c) => c.stub && !j.chats.some((x) => x.jid === c.jid));
+  S.chats = j.chats.concat(stubs);
+  if (S.cur) {
+    const fresh = S.chats.find((c) => c.jid === S.cur.jid);
+    if (fresh) { const changed = stateSig(fresh) !== stateSig(S.cur); S.cur = fresh; if (changed) fillHead(); if (fresh.unread) markRead(); }
+  }
+  renderTabs(); renderChats();
+}
+const stateSig = (c) => JSON.stringify([c.status, c.assignee_id, c.labels, c.subject]);
+const sortChats = () => S.chats.sort((a, b) => new Date(b.last_ts || b.stub_ts || 0) - new Date(a.last_ts || a.stub_ts || 0));
 function visible(c) {
+  if (S.kind === 'group' && !c.is_group) return false;
+  if (S.kind === 'dm' && c.is_group) return false;
   if (S.status === 'active' && c.status === 'resolved') return false;
   if (S.status === 'resolved' && c.status !== 'resolved') return false;
   if (S.tab === 'mine' && c.assignee_id !== S.me.id) return false;
   if (S.tab === 'unassigned' && c.assignee_id) return false;
   if (S.tab === 'waiting' && !(c.waiting_since && c.status !== 'resolved')) return false;
-  const f = S.q.toLowerCase(); if (f && !(c.subject || c.jid).toLowerCase().includes(f) && !c.labels.some((l) => l.toLowerCase().includes(f))) return false;
+  const f = S.q.toLowerCase();
+  if (f && !(nameOf(c).toLowerCase().includes(f) || (c.phone || '').includes(f.replace(/\D/g, '') || '\u0000') || c.labels.some((l) => l.toLowerCase().includes(f)))) return false;
   return true;
 }
 function renderTabs() {
-  const count = { waiting: S.chats.filter((c) => c.waiting_since && c.status !== 'resolved').length, mine: S.chats.filter((c) => c.assignee_id === S.me.id && c.status !== 'resolved').length, unassigned: S.chats.filter((c) => !c.assignee_id && c.status !== 'resolved').length };
-  const t = $('tabs'); t.replaceChildren();
-  for (const [k, label] of [['all', 'All'], ['mine', 'Mine'], ['unassigned', 'Unowned'], ['waiting', 'Waiting']]) {
-    const b = h('button', S.tab === k ? 'on' : '', label + (count[k] ? ' ' + count[k] : '')); b.onclick = () => { S.tab = k; renderTabs(); renderChats(); }; t.append(b);
-  }
+  const live = S.chats.filter((c) => c.status !== 'resolved');
+  const count = { waiting: live.filter((c) => c.waiting_since).length, mine: live.filter((c) => c.assignee_id === S.me.id).length, unassigned: live.filter((c) => !c.assignee_id).length };
+  const t = $('tabs'), want = [['all', 'All'], ['mine', 'Mine'], ['unassigned', 'Unowned'], ['waiting', 'Waiting']];
+  if (t.children.length !== want.length) { t.replaceChildren(); want.forEach(([k]) => { const b = h('button'); b.dataset.k = k; b.onclick = () => { S.tab = k; renderTabs(); renderChats(); }; t.append(b); }); }
+  want.forEach(([k, label], i) => { const b = t.children[i]; b.textContent = label + (count[k] ? ' ' + count[k] : ''); b.className = S.tab === k ? 'on' : ''; });
+}
+const rowCache = new Map();
+function chatRow(c) {
+  const on = S.cur && S.cur.jid === c.jid;
+  const sig = JSON.stringify([nameOf(c), c.is_group, c.status, c.assignee_id, c.assignee_name, c.labels, c.unread, c.last_ts, c.last_text, c.last_type, c.last_from_me, c.last_sender, c.last_deleted, c.waiting_since && Math.floor(Date.now() / 60000), on, new Date().toDateString()]);
+  const hit = rowCache.get(c.jid); if (hit && hit.sig === sig) return hit.node;
+  const name = nameOf(c), d = h('div', 'g' + (on ? ' on' : ''));
+  const av = h('div', 'av' + (c.is_group ? ' grp' : ''), initials(name)); av.style.background = color(c.jid);
+  const mid = h('div', 'mid'), nm = h('div', 'name'); const dot = h('span', 'dot s-' + c.status); dot.title = c.status; nm.append(dot, h('span', '', name));
+  mid.append(nm, h('div', 'prev', preview(c)));
+  const chips = [...(c.assignee_name ? [h('span', 'chip' + (c.assignee_id === S.me.id ? ' me' : ''), c.assignee_name)] : []), ...c.labels.slice(0, 2).map((l) => h('span', 'chip', l))];
+  if (chips.length) { const meta = h('div', 'sub'); meta.append(...chips); mid.append(meta); }
+  const right = h('div', 'right'); right.append(h('div', 'sub', shortTime(c.last_ts)));
+  if (c.unread) right.append(h('span', 'badge', String(c.unread)));
+  if (c.waiting_since && c.status !== 'resolved') { const m = ago(c.waiting_since); right.append(h('span', 'wait' + (m > 30 ? ' late' : ''), '⏱ ' + mins(m))); }
+  d.append(av, mid, right); d.dataset.jid = c.jid; d.onclick = () => openChat(c.jid);
+  rowCache.set(c.jid, { sig, node: d }); return d;
 }
 function renderChats() {
   sortChats(); updateTitle();
-  const box = $('glist'); box.replaceChildren();
-  for (const c of S.chats.filter(visible)) {
-    const name = c.subject || c.jid, d = h('div', 'g' + (S.cur && S.cur.jid === c.jid ? ' on' : ''));
-    const av = h('div', 'av', initials(name)); av.style.background = color(c.jid);
-    const mid = h('div', 'mid'), nm = h('div', 'name'); nm.append(h('span', 'dot s-' + c.status), h('span', '', name)); nm.firstChild.title = c.status;
-    const meta = h('div', 'sub'); meta.append(...(c.assignee_name ? [h('span', 'chip' + (c.assignee_id === S.me.id ? ' me' : ''), c.assignee_name)] : []), ...c.labels.slice(0, 2).map((l) => h('span', 'chip', l)));
-    mid.append(nm, h('div', 'prev', preview(c)), ...(meta.childNodes.length ? [meta] : []));
-    const right = h('div', 'right'); right.append(h('div', 'sub', shortTime(c.last_ts)));
-    if (c.unread) right.append(h('span', 'badge', String(c.unread)));
-    if (c.waiting_since && c.status !== 'resolved') { const m = ago(c.waiting_since); right.append(h('span', 'wait' + (m > 30 ? ' late' : ''), '⏱ ' + mins(m))); }
-    d.append(av, mid, right); d.onclick = () => openChat(c.jid); box.append(d);
-  }
-  if (!box.childNodes.length) box.append(h('div', 'empty', 'Nothing here.'));
+  const box = $('glist'), list = S.chats.filter(visible);
+  const nodes = list.map(chatRow);
+  if (!nodes.length) { let e = box.querySelector('.empty'); if (!e) e = h('div', 'empty', ''); e.textContent = S.chats.length ? 'Nothing matches these filters.' : 'No chats yet. Messages will appear here as they arrive.'; nodes.push(e); }
+  reconcile(box, nodes);
+  for (const k of rowCache.keys()) if (!S.chats.some((c) => c.jid === k)) rowCache.delete(k);
 }
 
 // ---------- open a chat
 const nq = () => (S.nf ? '&number=' + encodeURIComponent(S.nf) : '');
 const mUrl = (jid, qs) => `/api/groups/${encodeURIComponent(jid)}/messages?include=reactions&${qs}${nq()}`;
-async function openChat(jid) {
-  S.cur = S.chats.find((c) => c.jid === jid) || { jid, subject: jid, numbers: [], labels: [], status: 'open' };
-  S.replyTo = null; S.attach = null; S.searching = false; $('msearch').value = '';
+function saveDraft() { if (S.cur) { const t = $('text').value; if (t) S.drafts[S.cur.jid] = t; else delete S.drafts[S.cur.jid]; } }
+async function openChat(jid, stub) {
+  saveDraft();
+  const tok = ++S.openTok;
+  let c = S.chats.find((x) => x.jid === jid);
+  if (!c) { c = stub || { jid, is_group: jid.endsWith('@g.us'), subject: null, phone: jid.endsWith('@s.whatsapp.net') ? jid.split('@')[0] : null, numbers: [], labels: [], status: 'open', stub: true, stub_ts: new Date().toISOString() }; S.chats.push(c); }
+  S.cur = c; S.msgs = []; S.hasMore = false; S.notes = []; S.replyTo = null; S.attach = null; S.searching = false; S.loading = true; S.loadErr = ''; S.stick = true;
+  bubbleCache.clear(); $('msearch').value = ''; $('text').value = S.drafts[jid] || ''; $('text').style.height = '44px'; $('err').textContent = '';
   $('app').classList.add('chat'); $('head').hidden = false; $('composer').hidden = false; $('quick').hidden = true;
-  fillHead(); fillSendAs(); showReply(); showFile(); renderChats();
-  const j = await api(mUrl(jid, 'limit=60'));
-  S.msgs = j.messages.reverse(); S.hasMore = j.count >= 60; renderMsgs(true);
-  loadNotes(); markRead();
+  fillHead(); fillSendAs(); showReply(); showFile(); renderChats(); renderMsgs('bottom');
+  if (S.panel) refreshPanel();
+  try {
+    const j = await api(mUrl(jid, 'limit=60'));
+    if (tok !== S.openTok) return;
+    S.msgs = j.messages.reverse(); S.hasMore = j.count >= 60; S.loading = false;
+    renderMsgs('bottom'); markRead();
+  } catch (e) {
+    if (tok !== S.openTok) return;
+    S.loading = false; S.loadErr = e.message; renderMsgs('keep');
+  }
 }
 function fillHead() {
-  const c = S.cur; $('title').textContent = c.subject || c.jid; $('status').value = c.status || 'open';
+  const c = S.cur; if (!c) return;
+  $('title').textContent = nameOf(c);
+  $('subtitle').textContent = c.is_group ? (c.participant_count ? c.participant_count + ' members' : 'Group') : (c.phone ? '+' + c.phone : 'Direct chat');
+  $('status').value = c.status || 'open';
   const a = $('assignee'); a.replaceChildren(new Option('Unassigned', ''), ...S.users.map((u) => new Option('Owner: ' + u.name, String(u.id)))); a.value = c.assignee_id ? String(c.assignee_id) : '';
   const l = $('labels'); l.replaceChildren();
   for (const x of c.labels || []) { const ch = h('span', 'chip', x), b = h('button', '', '×'); b.onclick = () => saveState({ labels: c.labels.filter((y) => y !== x) }); ch.append(b); l.append(ch); }
@@ -241,38 +324,45 @@ function fillHead() {
   l.append(inp);
 }
 async function saveState(patch) {
-  try { const j = await api(`/portal/chat/chats/${encodeURIComponent(S.cur.jid)}/state`, { method: 'PUT', body: patch }); applyState(j.state); }
-  catch (e) { alert(e.message); fillHead(); }
+  const jid = S.cur && S.cur.jid; if (!jid) return;
+  try { const j = await api(`/portal/chat/chats/${encodeURIComponent(jid)}/state`, { method: 'PUT', body: patch }); applyState(j.state); }
+  catch (e) { toast(e.message); fillHead(); }
 }
 function applyState(st) {
   const c = S.chats.find((x) => x.jid === st.chat_jid); if (!c) return;
   Object.assign(c, { status: st.status, assignee_id: st.assignee_id, assignee_name: st.assignee_name, labels: st.labels });
-  if (S.cur && S.cur.jid === c.jid) { S.cur = c; fillHead(); } renderTabs(); renderChats();
+  if (S.cur && S.cur.jid === c.jid) { S.cur = c; fillHead(); }
+  renderTabs(); renderChats();
 }
 function fillSendAs() {
-  const s = $('sendas'), ids = (S.cur.numbers || []).filter((id) => S.numbers.find((n) => n.id === id && n.state === 'open'));
-  s.hidden = ids.length < 2; s.replaceChildren(...ids.map((id) => new Option('Send as ' + (S.numbers.find((n) => n.id === id)?.label || id), String(id))));
+  const s = $('sendas'); if (!S.cur) return;
+  const ids = (S.cur.numbers || []).filter((id) => S.numbers.find((n) => n.id === id && n.state === 'open'));
+  const keep = s.value; s.hidden = ids.length < 2;
+  s.replaceChildren(...ids.map((id) => new Option('Send as ' + numLabel(id), String(id)))); if (ids.map(String).includes(keep)) s.value = keep;
 }
 function markRead() {
-  const c = S.cur; if (!c || !S.msgs.length || document.visibilityState !== 'visible') return;
-  const last = Math.max(...S.msgs.map((m) => m.uid)); if (!c.unread) return;
-  c.unread = 0; renderChats(); api(`/portal/chat/chats/${encodeURIComponent(c.jid)}/read`, { method: 'POST', body: { uid: last } }).catch(() => {});
+  const c = S.cur; if (!c || !S.msgs.length || document.visibilityState !== 'visible' || !c.unread) return;
+  const last = Math.max(...S.msgs.map((m) => m.uid)); c.unread = 0; renderChats();
+  api(`/portal/chat/chats/${encodeURIComponent(c.jid)}/read`, { method: 'POST', body: { uid: last } }).catch(() => {});
 }
 
 // ---------- messages
 const EMOJI = ['👍', '❤️', '😂', '🙏', '✅'];
+const bubbleCache = new Map();
+function quotedText(m) { if (!m.quoted_id) return ''; const qm = S.msgs.find((x) => x.id === m.quoted_id); return qm ? ((qm.from_me ? (qm.sent_by_name || 'We') : (qm.sender_name || '+' + qm.sender_phone)) + ': ' + (qm.text || '[' + qm.type + ']').slice(0, 120)) : 'Reply to an earlier message'; }
 function bubble(m) {
   const b = h('div', 'b' + (m.from_me ? ' me' : '')); b.dataset.uid = m.uid;
-  if (!m.from_me) { const w = h('div', 'who', m.sender_name || (m.sender_phone ? '+' + m.sender_phone : 'Unknown')); w.style.color = color(m.sender_phone || m.sender_name || 'x'); b.append(w); }
+  const group = S.cur && S.cur.is_group;
+  if (!m.from_me) { if (group) { const w = h('div', 'who', m.sender_name || (m.sender_phone ? '+' + m.sender_phone : 'Unknown')); w.style.color = color(m.sender_phone || m.sender_name || 'x'); b.append(w); } }
   else { const nm = S.numbers.find((n) => n.id === m.number_id); const parts = [m.sent_by_name || 'Phone / API']; if (S.numbers.length > 1 && nm) parts.push(nm.label); b.append(h('div', 'who', parts.join(' · '))); }
-  if (m.quoted_id) { const qm = S.msgs.find((x) => x.id === m.quoted_id); b.append(h('div', 'q', qm ? ((qm.from_me ? (qm.sent_by_name || 'We') : (qm.sender_name || '+' + qm.sender_phone)) + ': ' + (qm.text || '[' + qm.type + ']').slice(0, 120)) : 'Reply to an earlier message')); }
+  if (m.quoted_id) b.append(h('div', 'q', quotedText(m)));
   const med = m.media;
   if (med && med.url) {
     const u = '/api/media/' + m.uid, mime = med.mime || '';
-    if (m.type === 'image' || m.type === 'sticker' || mime.startsWith('image/')) { const i = h('img'); i.loading = 'lazy'; i.src = u; i.alt = m.type; b.append(i); }
+    if (m.type === 'image' || m.type === 'sticker' || mime.startsWith('image/')) { const i = h('img'); i.loading = 'lazy'; i.src = u; i.alt = m.type; i.onload = () => { if (S.stick) { const box = $('msgs'); box.scrollTop = box.scrollHeight; } }; i.onerror = () => { i.replaceWith(h('div', 'sub', 'Image unavailable (WhatsApp no longer has it)')); }; b.append(i); }
     else if (m.type === 'video' || mime.startsWith('video/')) { const v = h('video'); v.controls = true; v.preload = 'none'; v.src = u; b.append(v); }
     else if (m.type === 'audio' || mime.startsWith('audio/')) { const a = h('audio'); a.controls = true; a.preload = 'none'; a.src = u; b.append(a); if (m.is_voice_note) b.append(h('div', 'sub', 'Voice note' + (med.seconds ? ' · ' + med.seconds + 's' : ''))); }
-    else { const a = h('a', '', '📎 ' + (med.filename || 'Download file')); a.href = u; a.target = '_blank'; b.append(a); }
+    else { const a = h('a', '', '📎 ' + (med.filename || 'Download file')); a.href = u; a.target = '_blank'; a.rel = 'noopener'; b.append(a); }
   } else if (med && med.error) b.append(h('div', 'sub', 'File unavailable'));
   else if (!m.text && m.type && m.type !== 'text') b.append(h('div', 'sub', '[' + m.type + ']'));
   if (m.text) b.append(h('div', 'txt' + (m.deleted ? ' del' : ''), m.text));
@@ -286,32 +376,61 @@ function bubble(m) {
     mk('☺', 'React', () => { b.querySelector('.picker')?.remove(); const p = h('div', 'picker'); EMOJI.forEach((e) => { const x = h('button', '', e); x.onclick = (ev) => { ev.stopPropagation(); p.remove(); act('/portal/chat/react', { uid: m.uid, emoji: e }); }; p.append(x); }); b.append(p); });
     if (m.from_me && (S.me.role === 'admin' || m.sent_by_name === S.me.name)) {
       if (m.text) mk('✎', 'Edit', () => { const t = prompt('Edit message', m.text); if (t && t.trim() && t !== m.text) act('/portal/chat/edit', { uid: m.uid, text: t.trim() }); });
-      mk('🗑', 'Delete for everyone', () => { if (confirm('Delete this message for everyone in the group?')) act('/portal/chat/delete', { uid: m.uid }); });
+      mk('🗑', 'Delete for everyone', () => { if (confirm('Delete this message for everyone?')) act('/portal/chat/delete', { uid: m.uid }); });
     }
     b.append(acts);
   }
   return b;
 }
-async function act(path, body) { try { await api(path, { method: 'POST', body }); setTimeout(reloadTail, 400); } catch (e) { $('err').textContent = e.message; } }
-function renderMsgs(toBottom) {
-  const box = $('msgs'), keep = box.scrollHeight - box.scrollTop; box.replaceChildren();
-  if (S.hasMore) { const bt = h('button', 'more', 'Load older messages'); bt.onclick = loadOlder; box.append(bt); }
-  if (!S.msgs.length) box.append(h('div', 'empty', S.searching ? 'No messages match.' : 'No messages yet.'));
-  let last = '';
-  for (const m of S.msgs) { const d = new Date(m.timestamp).toDateString(); if (d !== last) { box.append(h('div', 'day', dayLabel(m.timestamp))); last = d; } box.append(bubble(m)); }
-  box.scrollTop = toBottom ? box.scrollHeight : box.scrollHeight - keep;
+function bubbleFor(m) {
+  const sig = JSON.stringify([m.text, m.deleted, m.edited_at, m.sent_by_name, m.transcript, m.reactions, m.media && [m.media.url, m.media.error], m.type, m.timestamp, m.number_id, quotedText(m), S.numbers.length, S.cur && S.cur.is_group]);
+  const hit = bubbleCache.get(m.uid); if (hit && hit.sig === sig) return hit.node;
+  const node = bubble(m); bubbleCache.set(m.uid, { sig, node }); return node;
 }
+const dayCache = new Map();
+function dayNode(label) { let n = dayCache.get(label); if (!n) { n = h('div', 'day', label); dayCache.set(label, n); } return n; }
+let moreBtn;
+async function act(path, body) { try { await api(path, { method: 'POST', body }); setTimeout(() => reloadTail().catch(() => {}), 400); } catch (e) { toast(e.message); } }
+/** mode: 'bottom' = jump to newest, 'auto' = follow new messages only if already at the bottom, 'prepend' = keep position after loading older, 'keep' */
+function renderMsgs(mode = 'keep') {
+  const box = $('msgs'), prevH = box.scrollHeight, prevTop = box.scrollTop, nearBottom = prevH - prevTop - box.clientHeight < 160;
+  const nodes = [];
+  if (S.loading) nodes.push(Object.assign(h('div', 'skel', 'Loading messages…'), {}));
+  else if (S.loadErr) { const d = h('div', 'skel'); d.append(h('div', '', 'Could not load this chat: ' + S.loadErr), (() => { const b = h('button', 'sm', 'Try again'); b.style.marginTop = '8px'; b.onclick = () => openChat(S.cur.jid); return b; })()); nodes.push(d); }
+  else {
+    if (S.hasMore && !S.searching) { if (!moreBtn) { moreBtn = h('button', 'more', 'Load older messages'); moreBtn.onclick = loadOlder; } moreBtn.disabled = false; nodes.push(moreBtn); }
+    if (!S.msgs.length) nodes.push(h('div', 'empty', S.searching ? 'No messages match.' : (S.cur && S.cur.stub ? 'New chat. Type your first message below.' : 'No messages yet.')));
+    let last = '';
+    for (const m of S.msgs) { const d = new Date(m.timestamp).toDateString(); if (d !== last) { nodes.push(dayNode(dayLabel(m.timestamp))); last = d; } nodes.push(bubbleFor(m)); }
+    const keep = new Set(S.msgs.map((m) => m.uid)); for (const k of bubbleCache.keys()) if (!keep.has(k)) bubbleCache.delete(k);
+  }
+  reconcile(box, nodes);
+  if (mode === 'bottom' || (mode === 'auto' && nearBottom)) { box.scrollTop = box.scrollHeight; S.stick = true; }
+  else if (mode === 'prepend') box.scrollTop = prevTop + (box.scrollHeight - prevH);
+}
+$('msgs').addEventListener('scroll', () => { const b = $('msgs'); S.stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; }, { passive: true });
 async function loadOlder() {
-  if (!S.msgs.length || S.searching) return;
-  const j = await api(mUrl(S.cur.jid, `limit=60&before_uid=${S.msgs[0].uid}`));
-  S.msgs = j.messages.reverse().concat(S.msgs); S.hasMore = j.count >= 60; renderMsgs(false);
+  if (!S.msgs.length || S.searching || !S.cur) return;
+  const tok = S.openTok; if (moreBtn) moreBtn.disabled = true;
+  try {
+    const j = await api(mUrl(S.cur.jid, `limit=60&before_uid=${S.msgs[0].uid}`));
+    if (tok !== S.openTok) return;
+    S.msgs = j.messages.reverse().concat(S.msgs); S.hasMore = j.count >= 60; renderMsgs('prepend');
+  } catch (e) { toast(e.message); if (moreBtn) moreBtn.disabled = false; }
 }
 function merge(list) {
-  const box = $('msgs'), near = box.scrollHeight - box.scrollTop - box.clientHeight < 160; let changed = false;
-  for (const m of list) { const i = S.msgs.findIndex((x) => x.uid === m.uid); if (i >= 0) { S.msgs[i] = { ...S.msgs[i], ...m }; changed = true; } else { S.msgs.push(m); changed = true; } }
-  if (changed) { S.msgs.sort((a, b) => a.uid - b.uid); renderMsgs(near); }
+  if (S.loading || S.loadErr) return;
+  let changed = false;
+  for (const m of list) { const i = S.msgs.findIndex((x) => x.uid === m.uid); if (i >= 0) { S.msgs[i] = { ...S.msgs[i], ...m }; } else S.msgs.push(m); changed = true; }
+  if (changed) { S.msgs.sort((a, b) => a.uid - b.uid); renderMsgs('auto'); }
 }
-async function reloadTail() { if (!S.cur || S.searching) return; const j = await api(mUrl(S.cur.jid, 'limit=40')); merge(j.messages); markRead(); }
+let tailBusy = false;
+async function reloadTail() {
+  if (!S.cur || S.searching || S.loading || tailBusy) return;
+  const tok = S.openTok; tailBusy = true;
+  try { const j = await api(mUrl(S.cur.jid, 'limit=40')); if (tok !== S.openTok) return; merge(j.messages); markRead(); }
+  finally { tailBusy = false; }
+}
 
 // ---------- replying
 function showReply() {
@@ -328,81 +447,195 @@ $('file').onchange = () => {
   r.readAsDataURL(f);
 };
 async function send() {
-  if (!S.cur) return; const t = $('text').value.trim(); if (!t && !S.attach) return;
-  $('err').textContent = ''; $('send').disabled = true;
+  if (!S.cur || S.sending) return; const t = $('text').value.trim(); if (!t && !S.attach) return;
+  const chat = S.cur, jid = chat.jid;
+  $('err').textContent = ''; $('send').disabled = true; S.sending = true;
   try {
-    const body = { to: S.cur.jid }; if (S.replyTo) body.reply_to_uid = S.replyTo.uid; if (!$('sendas').hidden && $('sendas').value) body.number = $('sendas').value;
-    if (S.attach) { Object.assign(body, { type: S.attach.type, data_base64: S.attach.b64, filename: S.attach.name, mimetype: S.attach.mime, caption: t || undefined }); await api('/portal/chat/send-media', { method: 'POST', body }); }
+    const body = { to: jid }; if (S.replyTo) body.reply_to_uid = S.replyTo.uid;
+    if (!$('sendas').hidden && $('sendas').value) body.number = $('sendas').value; else if (chat.useNumber) body.number = chat.useNumber;
+    if (S.attach) { Object.assign(body, { type: S.attach.type, data_base64: S.attach.b64, filename: S.attach.name, mimetype: S.attach.mime, caption: t || undefined }); await api('/portal/chat/send-media', { method: 'POST', body, timeout: 120000 }); }
     else { body.text = t; await api('/portal/chat/send', { method: 'POST', body }); }
-    $('text').value = ''; $('text').style.height = '44px'; S.replyTo = null; S.attach = null; showReply(); showFile(); await reloadTail();
+    delete S.drafts[jid];
+    if (S.cur && S.cur.jid === jid) { $('text').value = ''; $('text').style.height = '44px'; S.replyTo = null; S.attach = null; showReply(); showFile(); }
+    scheduleChats(600);
   } catch (e) { $('err').textContent = e.message; }
-  $('send').disabled = false;
+  finally { S.sending = false; $('send').disabled = false; }
+  if (S.cur && S.cur.jid === jid) { S.stick = true; await reloadTail().catch(() => {}); }
 }
 $('send').onclick = send;
-$('text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+$('text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $('text').addEventListener('input', (e) => { e.target.style.height = '44px'; e.target.style.height = Math.min(140, e.target.scrollHeight) + 'px'; });
 $('replyx').onclick = () => { S.replyTo = null; showReply(); };
 $('filex').onclick = () => { S.attach = null; showFile(); };
 
 // ---------- quick replies
 async function loadQuick() { S.quick = (await api('/portal/chat/quick')).replies; }
-$('quickBtn').onclick = () => { const q = $('quick'); if (!q.hidden) { q.hidden = true; return; } q.hidden = false; renderQuick(''); };
-function renderQuick(filter) {
+$('quickBtn').onclick = () => { const q = $('quick'); if (!q.hidden) { q.hidden = true; return; } q.hidden = false; buildQuick(); };
+function buildQuick() {
   const q = $('quick'); q.replaceChildren();
-  const f = h('input'); f.placeholder = 'Search quick replies'; f.value = filter; f.oninput = () => { renderQuick(f.value); $('quick').querySelector('input').focus(); }; q.append(f);
-  for (const r of S.quick.filter((x) => !filter || (x.title + x.body).toLowerCase().includes(filter.toLowerCase()))) {
-    const it = h('div', 'it'); it.append(h('b', '', r.title), h('span', '', r.body.slice(0, 120)));
-    if (S.me.role === 'admin' || r.created_by === S.me.name) { const x = h('button', 'sm', 'Delete'); x.style.float = 'right'; x.onclick = async (e) => { e.stopPropagation(); await api('/portal/chat/quick/' + r.id, { method: 'DELETE' }); await loadQuick(); renderQuick(filter); }; it.prepend(x); }
-    it.onclick = () => { $('text').value = r.body; $('quick').hidden = true; $('text').focus(); }; q.append(it);
-  }
+  const f = h('input'); f.placeholder = 'Search quick replies'; const list = h('div'); list.style.cssText = 'display:flex;flex-direction:column;gap:6px';
   const add = h('button', 'sm primary', 'Save what I typed as a new quick reply');
-  add.onclick = async () => { const body = $('text').value.trim(); if (!body) { alert('Type the reply in the message box first.'); return; } const title = prompt('Name for this quick reply', body.slice(0, 30)); if (!title) return;
-    try { await api('/portal/chat/quick', { method: 'POST', body: { title, body } }); await loadQuick(); renderQuick(''); } catch (e) { alert(e.message); } };
-  q.append(add);
+  const draw = () => {
+    const filter = f.value.toLowerCase(); list.replaceChildren();
+    const hits = S.quick.filter((x) => !filter || (x.title + x.body).toLowerCase().includes(filter));
+    if (!hits.length) list.append(h('div', 'sub', S.quick.length ? 'No match.' : 'No quick replies yet. Type a reply, then save it below.'));
+    for (const r of hits) {
+      const it = h('div', 'it'); it.append(h('b', '', r.title), h('span', '', r.body.slice(0, 120)));
+      if (S.me.role === 'admin' || r.created_by === S.me.name) { const x = h('button', 'sm', 'Delete'); x.style.float = 'right'; x.onclick = async (e) => { e.stopPropagation(); try { await api('/portal/chat/quick/' + r.id, { method: 'DELETE' }); await loadQuick(); draw(); } catch (er) { toast(er.message); } }; it.prepend(x); }
+      it.onclick = () => { $('text').value = r.body; $('quick').hidden = true; $('text').focus(); }; list.append(it);
+    }
+  };
+  f.oninput = draw;
+  add.onclick = async () => { const body = $('text').value.trim(); if (!body) { toast('Type the reply in the message box first.'); return; } const title = prompt('Name for this quick reply', body.slice(0, 30)); if (!title) return;
+    try { await api('/portal/chat/quick', { method: 'POST', body: { title, body } }); await loadQuick(); draw(); } catch (e) { toast(e.message); } };
+  q.append(f, list, add); draw(); f.focus();
 }
 
-// ---------- notes
-async function loadNotes() { S.notes = (await api(`/portal/chat/chats/${encodeURIComponent(S.cur.jid)}/notes`)).notes; renderNotes(); }
+// ---------- side panel: notes and info
+function setPanel(open, tab) {
+  S.panel = open; if (tab) S.panelTab = tab; $('panel').hidden = !open;
+  $('tabNotes').className = S.panelTab === 'notes' ? 'on' : ''; $('tabInfo').className = S.panelTab === 'info' ? 'on' : '';
+  $('notesPane').hidden = S.panelTab !== 'notes'; $('infoPane').hidden = S.panelTab !== 'info';
+  if (open) refreshPanel();
+}
+function refreshPanel() { if (!S.cur) return; if (S.panelTab === 'notes') loadNotes().catch(() => {}); else loadInfo().catch((e) => { $('infoPane').replaceChildren(h('div', 'empty', e.message)); }); }
+$('notesBtn').onclick = () => setPanel(!(S.panel && S.panelTab === 'notes'), 'notes');
+$('infoBtn').onclick = () => setPanel(!(S.panel && S.panelTab === 'info'), 'info');
+$('tabNotes').onclick = () => setPanel(true, 'notes'); $('tabInfo').onclick = () => setPanel(true, 'info');
+$('panelx').onclick = () => setPanel(false);
+
+async function loadNotes() { const jid = S.cur.jid; const j = await api(`/portal/chat/chats/${encodeURIComponent(jid)}/notes`); if (S.cur && S.cur.jid === jid) { S.notes = j.notes; renderNotes(); } }
 function renderNotes() {
   const box = $('notes'); box.replaceChildren();
   for (const n of S.notes) {
     if (n.kind === 'event') { box.append(h('div', 'ev', n.user_name + ' ' + n.text + ' · ' + dayLabel(n.created_at) + ' ' + hm(n.created_at))); continue; }
     const d = h('div', 'note'), by = h('span', 'by', n.user_name + ' · ' + dayLabel(n.created_at) + ' ' + hm(n.created_at));
-    if (S.me.role === 'admin' || n.user_name === S.me.name) { const x = h('button', '', 'delete'); x.onclick = () => api('/portal/chat/notes/' + n.id, { method: 'DELETE' }).catch((e) => alert(e.message)); by.append(x); }
+    if (S.me.role === 'admin' || n.user_name === S.me.name) { const x = h('button', '', 'delete'); x.onclick = () => api('/portal/chat/notes/' + n.id, { method: 'DELETE' }).catch((e) => toast(e.message)); by.append(x); }
     d.append(by, document.createTextNode(n.text)); box.append(d);
   }
   box.scrollTop = box.scrollHeight;
 }
-$('notesBtn').onclick = () => { S.panel = !S.panel; $('panel').hidden = !S.panel; if (S.panel) loadNotes(); };
-$('panelx').onclick = () => { S.panel = false; $('panel').hidden = true; };
-$('noteAdd').onclick = async () => { const t = $('noteText').value.trim(); if (!t || !S.cur) return; try { await api(`/portal/chat/chats/${encodeURIComponent(S.cur.jid)}/notes`, { method: 'POST', body: { text: t } }); $('noteText').value = ''; } catch (e) { alert(e.message); } };
+$('noteAdd').onclick = async () => { const t = $('noteText').value.trim(); if (!t || !S.cur) return; try { await api(`/portal/chat/chats/${encodeURIComponent(S.cur.jid)}/notes`, { method: 'POST', body: { text: t } }); $('noteText').value = ''; } catch (e) { toast(e.message); } };
+
+let infoTimer;
+async function loadInfo() {
+  const c = S.cur, box = $('infoPane'); if (!c) return;
+  if (!c.is_group) {
+    box.replaceChildren(); const d = h('div'); d.style.padding = '14px';
+    d.append(h('b', '', nameOf(c)), h('div', 'sub', c.phone ? '+' + c.phone : c.jid), h('div', 'sub', 'Talks to us through: ' + ((c.numbers || []).map(numLabel).join(', ') || 'not yet')));
+    box.append(d); return;
+  }
+  const jid = c.jid; const g = await api('/portal/chat/groups/' + encodeURIComponent(jid));
+  if (!S.cur || S.cur.jid !== jid) return;
+  box.replaceChildren();
+  const top = h('div'); top.style.cssText = 'padding:12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)';
+  const name = h('input'); name.value = g.subject || ''; name.maxLength = 100;
+  const rn = h('button', 'sm', 'Rename group'); rn.disabled = !canWrite();
+  rn.onclick = async () => { const v = name.value.trim(); if (!v || v === g.subject) return; rn.disabled = true; try { await api(`/portal/chat/groups/${encodeURIComponent(jid)}/subject`, { method: 'PUT', body: { subject: v } }); toast('Group renamed.'); scheduleChats(800); loadInfo().catch(() => {}); } catch (e) { toast(e.message); rn.disabled = false; } };
+  top.append(h('label', 'hint', 'Group name'), name, rn); box.append(top);
+  box.append(Object.assign(h('div', 'hint', g.participants.length + ' members'), { style: 'padding:10px 12px 4px' }));
+  for (const p of g.participants) {
+    const r = h('div', 'mem'); const w = h('div', 'who', p.name ? p.name + (p.phone ? ' · +' + p.phone : '') : (p.phone ? '+' + p.phone : p.jid)); r.append(w);
+    if (p.admin) r.append(h('span', 'chip', 'admin'));
+    if (canWrite()) { const x = h('button', 'sm', 'Remove'); x.onclick = async () => { if (!confirm('Remove ' + (p.name || '+' + p.phone) + ' from this group?')) return; x.disabled = true; try { const o = await api(`/portal/chat/groups/${encodeURIComponent(jid)}/participants`, { method: 'POST', body: { action: 'remove', participants: [p.jid] } }); if (o.results && o.results[0] && !o.results[0].ok) toast('Could not remove: ' + o.results[0].reason); loadInfo().catch(() => {}); } catch (e) { toast(e.message); x.disabled = false; } }; r.append(x); }
+    box.append(r);
+  }
+  if (canWrite()) {
+    const add = h('div'); add.style.cssText = 'padding:12px;display:flex;flex-direction:column;gap:6px';
+    const ta = h('textarea'); ta.rows = 3; ta.placeholder = 'Add people: one phone number per line, with country code';
+    const b = h('button', 'primary sm', 'Add to group');
+    b.onclick = async () => { const nums = ta.value.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean); if (!nums.length) return; b.disabled = true;
+      try { const o = await api(`/portal/chat/groups/${encodeURIComponent(jid)}/participants`, { method: 'POST', body: { action: 'add', participants: nums } }); const bad = (o.results || []).filter((r) => !r.ok); toast(bad.length ? bad.length + ' could not be added: ' + bad.map((r) => r.reason).join(', ') : 'Added.'); ta.value = ''; loadInfo().catch(() => {}); }
+      catch (e) { toast(e.message); } b.disabled = false; };
+    add.append(h('label', 'hint', 'Add people'), ta, b); box.append(add);
+  }
+}
+
+// ---------- new chat / new group
+function closeModal() { $('modal').replaceChildren(); }
+function modal(title, build) {
+  closeModal();
+  const m = h('div', 'modal'), c = h('div', 'card'); const hd = h('div'); hd.style.cssText = 'display:flex;justify-content:space-between;align-items:center'; hd.append(h('h3', '', title)); const x = h('button', 'sm', 'Close'); x.onclick = closeModal; hd.append(x);
+  c.append(hd); build(c); m.append(c); m.onclick = (e) => { if (e.target === m) closeModal(); }; $('modal').append(m);
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+function numberPicker(c) {
+  const open = S.numbers.filter((n) => n.state === 'open'); if (open.length < 2) return () => (open[0] ? String(open[0].id) : undefined);
+  const wrap = h('div'); wrap.append(h('label', '', 'Use which WhatsApp number?')); const sel = h('select'); open.forEach((n) => sel.append(new Option(n.label, String(n.id)))); wrap.append(sel); c.append(wrap); return () => sel.value;
+}
+$('newChat').onclick = () => modal('New chat', (c) => {
+  const f = h('div', 'frm'); const wrap = h('div'); wrap.append(h('label', '', 'Phone number, with country code'));
+  const ph = h('input'); ph.placeholder = 'e.g. 919800000001'; ph.inputMode = 'tel'; ph.autocomplete = 'off'; wrap.append(ph); f.append(wrap);
+  c.append(f); const pick = numberPicker(f); const err = h('div', 'err'); const go = h('button', 'primary', 'Start chat'); f.append(go, err, h('div', 'hint', 'We check that the number is on WhatsApp first.'));
+  const run = async () => {
+    err.textContent = ''; go.disabled = true;
+    try {
+      const r = await api('/portal/chat/lookup', { method: 'POST', body: { phone: ph.value, number: pick() } });
+      closeModal();
+      const stub = { jid: r.jid, is_group: false, subject: null, phone: r.phone, numbers: [r.number], useNumber: String(r.number), labels: [], status: 'open', stub: true, stub_ts: new Date().toISOString() };
+      const had = S.chats.find((x) => x.jid === r.jid); if (had) had.useNumber = String(r.number);
+      await openChat(r.jid, stub); $('text').focus();
+    } catch (e) { err.textContent = e.message; go.disabled = false; }
+  };
+  go.onclick = run; ph.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); }); setTimeout(() => ph.focus(), 50);
+});
+$('newGroup').onclick = () => modal('New group', (c) => {
+  const f = h('div', 'frm'); c.append(f);
+  const w1 = h('div'); w1.append(h('label', '', 'Group name')); const nm = h('input'); nm.maxLength = 100; nm.placeholder = 'e.g. Acme - CX'; w1.append(nm);
+  const w2 = h('div'); w2.append(h('label', '', 'People to add')); const ta = h('textarea'); ta.rows = 5; ta.placeholder = 'One phone number per line, with country code\n919800000001\n919800000002'; w2.append(ta);
+  f.append(w1, w2); const pick = numberPicker(f); const err = h('div', 'err'); const go = h('button', 'primary', 'Create group');
+  f.append(go, err, h('div', 'hint', 'Everyone must be on WhatsApp. The linked number becomes the group admin. WhatsApp limits how fast groups can be created, so create only what you need.'));
+  go.onclick = async () => {
+    err.textContent = ''; go.disabled = true; go.textContent = 'Creating…';
+    try {
+      const r = await api('/portal/chat/groups', { method: 'POST', body: { subject: nm.value, participants: ta.value.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean), number: pick() }, timeout: 60000 });
+      closeModal(); await loadChats().catch(() => {}); await openChat(r.jid); toast('Group created.');
+    } catch (e) { err.textContent = e.message; go.disabled = false; go.textContent = 'Create group'; }
+  };
+  setTimeout(() => nm.focus(), 50);
+});
 
 // ---------- live updates
+const streams = {};
+function setLive(ok) {
+  S.live = ok; clearTimeout(setLive.t);
+  if (ok) $('offline').hidden = true; else setLive.t = setTimeout(() => { if (!S.live) $('offline').hidden = false; }, 4000);
+}
+function refreshAll() { scheduleChats(0); reloadTail().catch(() => {}); checkNumbers(); if (S.panel) refreshPanel(); }
+function closeLive() { for (const k of Object.keys(streams)) { try { streams[k].close(); } catch {} delete streams[k]; } }
 function live() {
-  const es = new EventSource('/api/stream' + (S.nf ? '?number=' + encodeURIComponent(S.nf) : '')); window._es = es;
-  es.addEventListener('message.created', (e) => {
-    const m = JSON.parse(e.data); const c = S.chats.find((x) => x.jid === m.chat_jid);
-    if (!c) { loadChats(); return; }
+  closeLive();
+  const es = new EventSource('/api/stream' + (S.nf ? '?number=' + encodeURIComponent(S.nf) : '')); streams.es = es;
+  const on = (src, ev, fn) => src.addEventListener(ev, (e) => { try { fn(JSON.parse(e.data)); } catch (err) { console.error('live', ev, err); } });
+  on(es, 'message.created', (m) => {
+    const c = S.chats.find((x) => x.jid === m.chat_jid);
+    if (!c) { scheduleChats(); return; }
     Object.assign(c, { last_ts: m.timestamp, last_text: m.text, last_type: m.type, last_from_me: m.from_me, last_sender: m.sender_name, last_deleted: false, last_uid: m.uid });
-    if (m.from_me) { c.waiting_since = null; } else { c.waiting_since = c.waiting_since || m.timestamp; }
-    const open = S.cur && S.cur.jid === m.chat_jid;
-    if (!m.from_me && !(open && document.visibilityState === 'visible')) { c.unread = (c.unread || 0) + 1; notify(c, m); }
+    if (c.stub) { c.stub = false; scheduleChats(); }
+    if (m.from_me) c.waiting_since = null; else c.waiting_since = c.waiting_since || m.timestamp;
+    const open = S.cur && S.cur.jid === m.chat_jid, seen = open && document.visibilityState === 'visible';
+    if (!m.from_me && !seen) { c.unread = (c.unread || 0) + 1; notify(c, m); }
     if (open && !S.searching) merge([m]);
     renderTabs(); renderChats(); if (open) markRead();
   });
-  const upd = (e) => { const m = JSON.parse(e.data); if (S.cur && m.chat_jid === S.cur.jid) merge([m]); };
-  es.addEventListener('message.updated', upd); es.addEventListener('message.deleted', upd);
-  es.addEventListener('reaction', (e) => { const d = JSON.parse(e.data); if (S.cur && (d.chat_jid === S.cur.jid || !d.chat_jid)) setTimeout(reloadTail, 300); });
-  es.addEventListener('group.updated', () => loadChats());
-  es.addEventListener('connection', () => checkNumbers());
-  es.onopen = () => { reloadTail().catch(() => {}); loadChats().catch(() => {}); };
-  const ts = new EventSource('/portal/chat/stream'); window._ts = ts;
-  ts.addEventListener('chat.state', (e) => applyState(JSON.parse(e.data)));
-  ts.addEventListener('chat.sent', (e) => { const d = JSON.parse(e.data); const m = S.msgs.find((x) => x.uid === d.uid); if (m) { m.sent_by_name = d.sent_by_name; renderMsgs(false); } });
-  ts.addEventListener('note.created', (e) => { const n = JSON.parse(e.data); if (S.cur && n.chat_jid === S.cur.jid) { S.notes.push(n); renderNotes(); } });
-  ts.addEventListener('note.deleted', (e) => { const d = JSON.parse(e.data); S.notes = S.notes.filter((n) => n.id !== d.id); renderNotes(); });
-  ts.addEventListener('quick.changed', () => loadQuick().catch(() => {}));
+  const upd = (m) => { if (S.cur && m.chat_jid === S.cur.jid && !S.searching) merge([m]); };
+  on(es, 'message.updated', upd); on(es, 'message.deleted', upd);
+  on(es, 'reaction', (d) => { if (S.cur && (d.chat_jid === S.cur.jid || !d.chat_jid)) setTimeout(() => reloadTail().catch(() => {}), 300); });
+  on(es, 'group.updated', () => { scheduleChats(); if (S.panel && S.panelTab === 'info') { clearTimeout(infoTimer); infoTimer = setTimeout(() => loadInfo().catch(() => {}), 500); } });
+  on(es, 'connection', () => checkNumbers());
+  let first = true;
+  es.onopen = () => { setLive(true); if (!first) refreshAll(); first = false; };
+  es.onerror = () => setLive(false);
+
+  const ts = new EventSource('/portal/chat/stream'); streams.ts = ts;
+  on(ts, 'chat.state', applyState);
+  on(ts, 'chat.sent', (d) => { const m = S.msgs.find((x) => x.uid === d.uid); if (m) { m.sent_by_name = d.sent_by_name; renderMsgs('keep'); } });
+  on(ts, 'note.created', (n) => { if (S.cur && n.chat_jid === S.cur.jid) { S.notes.push(n); if (S.panel && S.panelTab === 'notes') renderNotes(); } });
+  on(ts, 'note.deleted', (d) => { S.notes = S.notes.filter((n) => n.id !== d.id); if (S.panel && S.panelTab === 'notes') renderNotes(); });
+  on(ts, 'quick.changed', () => loadQuick().catch(() => {}));
 }
+// Browsers give up on a stream after a proxy error or a deploy; this brings it back, and catches up on what was missed.
+function ensureLive() { const dead = !streams.es || !streams.ts || streams.es.readyState === 2 || streams.ts.readyState === 2; if (dead) { live(); refreshAll(); } }
 
 // ---------- header, numbers, stats
 async function checkNumbers() {
@@ -411,12 +644,8 @@ async function checkNumbers() {
   b.hidden = !off.length;
   if (off.length) { b.textContent = ''; b.append(document.createTextNode((off.length === 1 ? 'Number "' + off[0].label + '" is' : off.length + ' numbers are') + ' offline, so messages to ' + (off.length === 1 ? 'it' : 'them') + ' are not being received. ')); if (S.me.role === 'admin') { const a = h('a', '', 'Open the portal to reconnect'); a.href = '/'; b.append(a); } else b.append(document.createTextNode('Tell an admin.')); }
   const nf = $('nfilter'); nf.hidden = S.numbers.length < 2;
-  if (!nf.options.length || nf.options.length !== S.numbers.length + 1) { nf.replaceChildren(new Option('All numbers', ''), ...S.numbers.map((n) => new Option(n.label, String(n.id)))); nf.value = S.nf; }
+  if (nf.options.length !== S.numbers.length + 1) { nf.replaceChildren(new Option('All numbers', ''), ...S.numbers.map((n) => new Option(n.label, String(n.id)))); nf.value = S.nf; }
   if (S.cur) fillSendAs();
-}
-function modal(title, build) {
-  const m = h('div', 'modal'), c = h('div', 'card'); const hd = h('div'); hd.style.cssText = 'display:flex;justify-content:space-between;align-items:center'; hd.append(h('h3', '', title)); const x = h('button', 'sm', 'Close'); x.onclick = () => m.remove(); hd.append(x);
-  c.append(hd); build(c); m.append(c); m.onclick = (e) => { if (e.target === m) m.remove(); }; $('modal').append(m);
 }
 $('meBtn').onclick = (e) => {
   e.preventDefault();
@@ -425,12 +654,12 @@ $('meBtn').onclick = (e) => {
     row('Team response times', showStats);
     const al = row(alertsOn() ? 'Desktop alerts: on (click to turn off)' : 'Turn on desktop alerts and sound', async () => {
       if (alertsOn()) { lsSet('alerts', '0'); al.textContent = 'Desktop alerts: off'; return; }
-      if (!('Notification' in window)) { alert('This browser does not support desktop alerts.'); return; }
-      const p = await Notification.requestPermission(); if (p === 'granted') { lsSet('alerts', '1'); al.textContent = 'Desktop alerts: on (click to turn off)'; beep(); } else alert('Allow notifications for this site in the browser first.');
+      if (!('Notification' in window)) { toast('This browser does not support desktop alerts.'); return; }
+      const p = await Notification.requestPermission(); if (p === 'granted') { lsSet('alerts', '1'); al.textContent = 'Desktop alerts: on (click to turn off)'; beep(); } else toast('Allow notifications for this site in the browser first.');
     });
     if (S.me.id) row('Change my password', () => {
       const o = prompt('Current password'); if (!o) return; const n = prompt('New password (at least 8 characters)'); if (!n) return;
-      api('/portal/password', { method: 'POST', body: { old: o, new: n } }).then(() => alert('Password changed.')).catch((er) => alert(er.message));
+      api('/portal/password', { method: 'POST', body: { old: o, new: n } }).then(() => toast('Password changed.')).catch((er) => toast(er.message));
     });
     row('Sign out', async () => { await fetch('/portal/logout', { method: 'POST' }); location.href = '/'; });
   });
@@ -449,23 +678,30 @@ async function showStats() {
 // ---------- wiring
 $('gsearch').oninput = () => { S.q = $('gsearch').value.trim(); renderChats(); };
 $('sfilter').onchange = () => { S.status = $('sfilter').value; renderChats(); };
-$('nfilter').onchange = async () => { S.nf = $('nfilter').value; window._es.close(); window._ts.close(); await loadChats(); live(); if (S.cur) openChat(S.cur.jid); };
+$('kfilter').onchange = () => { S.kind = $('kfilter').value; lsSet('kind', S.kind); renderChats(); };
+$('nfilter').onchange = async () => { S.nf = $('nfilter').value; live(); await loadChats().catch((e) => toast(e.message)); if (S.cur) openChat(S.cur.jid); };
 $('status').onchange = () => saveState({ status: $('status').value });
 $('assignee').onchange = () => saveState({ assignee_id: $('assignee').value ? Number($('assignee').value) : null });
-$('back').onclick = () => $('app').classList.remove('chat');
+$('back').onclick = () => { saveDraft(); $('app').classList.remove('chat'); };
 $('msearch').addEventListener('keydown', async (e) => {
-  if (e.key !== 'Enter' || !S.cur) return; const v = $('msearch').value.trim();
+  if (e.key !== 'Enter' || !S.cur) return; const v = $('msearch').value.trim(), tok = S.openTok;
   if (!v) { S.searching = false; return openChat(S.cur.jid); }
-  S.searching = true; S.hasMore = false; S.msgs = (await api(mUrl(S.cur.jid, `limit=200&search=${encodeURIComponent(v)}`))).messages.reverse(); renderMsgs(true);
+  try { const j = await api(mUrl(S.cur.jid, `limit=200&search=${encodeURIComponent(v)}`)); if (tok !== S.openTok) return; S.searching = true; S.hasMore = false; S.msgs = j.messages.reverse(); renderMsgs('bottom'); }
+  catch (er) { toast(er.message); }
 });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') markRead(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { ensureLive(); scheduleChats(0); reloadTail().catch(() => {}); markRead(); } });
+window.addEventListener('online', () => { ensureLive(); refreshAll(); });
+window.addEventListener('offline', () => setLive(false));
+setInterval(() => { if (document.visibilityState === 'visible') ensureLive(); }, 15000);
 setInterval(checkNumbers, 30000);
-setInterval(() => { if (document.visibilityState === 'visible') renderChats(); }, 60000);
+setInterval(() => { if (document.visibilityState === 'visible' && !S.live) scheduleChats(0); }, 45000);   // safety net while the live stream is down
+setInterval(() => { if (document.visibilityState === 'visible') renderChats(); }, 60000);                   // refresh "waiting" timers
 
 (async () => {
   const me = await api('/portal/chat/me'); S.me = me.user; S.writes = me.writes_enabled;
   $('meBtn').textContent = S.me.name; $('navPortal').hidden = S.me.role !== 'admin';
-  if (!S.writes) { $('composer').remove(); }
+  S.kind = ['all', 'group', 'dm'].includes(lsGet('kind')) ? lsGet('kind') : 'all'; $('kfilter').value = S.kind;
+  if (!S.writes) { $('composer').remove(); $('newbtns').remove(); }
   await Promise.all([checkNumbers(), api('/portal/chat/users').then((j) => { S.users = j.users; }), loadQuick().catch(() => {})]);
   await loadChats(); live();
 })().catch((e) => { $('msgs').replaceChildren(h('div', 'empty', 'Could not load: ' + e.message)); });

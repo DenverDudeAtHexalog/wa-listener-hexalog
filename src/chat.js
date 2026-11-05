@@ -86,31 +86,48 @@ router.get('/users', requirePortal, wrap(async () => ({
 router.get('/chats', requirePortal, wrap(async (req) => {
   const nid = req.query.number ? manager.resolve(req.query.number) : null;
   const { rows } = await q(
-    `SELECT g.jid,
-            (array_agg(g.subject ORDER BY g.updated_at DESC))[1] AS subject,
-            array_agg(g.number_id ORDER BY g.number_id) AS numbers,
-            max(g.participant_count) AS participant_count,
+    `WITH ids AS (
+       SELECT jid FROM wa_groups WHERE ($2::int IS NULL OR number_id = $2)
+       UNION
+       SELECT k.chat_jid FROM chat_known k
+        WHERE k.chat_jid NOT LIKE '%@g.us' AND ($2::int IS NULL OR EXISTS (SELECT 1 FROM messages m WHERE m.chat_jid = k.chat_jid AND m.number_id = $2))
+     )
+     SELECT i.jid, (i.jid LIKE '%@g.us') AS is_group,
+            g.subject, g.participant_count, g.numbers AS gnumbers, d.numbers AS dnumbers,
+            c.name AS contact_name, pn.sender_name AS push_name,
             cs.status, cs.assignee_id, u.name AS assignee_name, cs.labels,
             lm.uid AS last_uid, lm.ts AS last_ts, lm.text AS last_text, lm.type AS last_type,
             lm.from_me AS last_from_me, lm.sender_name AS last_sender, lm.deleted AS last_deleted,
-            (SELECT count(*) FROM messages m WHERE m.chat_jid = g.jid AND m.primary_copy AND NOT m.from_me AND NOT m.deleted
+            (SELECT count(*) FROM messages m WHERE m.chat_jid = i.jid AND m.primary_copy AND NOT m.from_me AND NOT m.deleted
                 AND m.uid > COALESCE(cr.last_uid, 0)) AS unread,
             CASE WHEN lm.from_me IS FALSE THEN
-              (SELECT min(x.ts) FROM messages x WHERE x.chat_jid = g.jid AND x.primary_copy AND NOT x.from_me
-                  AND x.uid > COALESCE((SELECT max(o.uid) FROM messages o WHERE o.chat_jid = g.jid AND o.primary_copy AND o.from_me), 0))
+              (SELECT min(x.ts) FROM messages x WHERE x.chat_jid = i.jid AND x.primary_copy AND NOT x.from_me
+                  AND x.uid > COALESCE((SELECT max(o.uid) FROM messages o WHERE o.chat_jid = i.jid AND o.primary_copy AND o.from_me), 0))
             END AS waiting_since
-       FROM wa_groups g
-       LEFT JOIN chat_state cs ON cs.chat_jid = g.jid
+       FROM ids i
+       LEFT JOIN LATERAL (SELECT (array_agg(w.subject ORDER BY w.updated_at DESC))[1] AS subject, max(w.participant_count) AS participant_count,
+                                 array_agg(w.number_id ORDER BY w.number_id) AS numbers FROM wa_groups w WHERE w.jid = i.jid) g ON true
+       LEFT JOIN LATERAL (SELECT array_agg(DISTINCT m.number_id) AS numbers FROM messages m WHERE m.chat_jid = i.jid AND i.jid NOT LIKE '%@g.us') d ON true
+       LEFT JOIN LATERAL (SELECT COALESCE(max(t.name), max(t.notify)) AS name FROM contacts t WHERE t.jid = i.jid AND i.jid NOT LIKE '%@g.us') c ON true
+       LEFT JOIN LATERAL (SELECT m.sender_name FROM messages m WHERE m.chat_jid = i.jid AND NOT m.from_me AND m.sender_name IS NOT NULL
+                           AND i.jid NOT LIKE '%@g.us' ORDER BY m.uid DESC LIMIT 1) pn ON true
+       LEFT JOIN chat_state cs ON cs.chat_jid = i.jid
        LEFT JOIN users u ON u.id = cs.assignee_id
-       LEFT JOIN chat_reads cr ON cr.user_key = $1 AND cr.chat_jid = g.jid
-       LEFT JOIN LATERAL (SELECT * FROM messages m WHERE m.chat_jid = g.jid AND m.primary_copy ORDER BY m.uid DESC LIMIT 1) lm ON true
-      WHERE ($2::int IS NULL OR g.number_id = $2)
-      GROUP BY g.jid, cs.status, cs.assignee_id, u.name, cs.labels, lm.uid, lm.ts, lm.text, lm.type, lm.from_me, lm.sender_name, lm.deleted, cr.last_uid`,
+       LEFT JOIN chat_reads cr ON cr.user_key = $1 AND cr.chat_jid = i.jid
+       LEFT JOIN LATERAL (SELECT * FROM messages m WHERE m.chat_jid = i.jid AND m.primary_copy ORDER BY m.uid DESC LIMIT 1) lm ON true
+      ORDER BY lm.ts DESC NULLS LAST
+      LIMIT 1500`,
     [req.me.key, nid]);
   return {
-    chats: rows.map((r) => ({
-      ...r, status: r.status || 'open', labels: r.labels || [], unread: Number(r.unread), last_uid: r.last_uid == null ? null : Number(r.last_uid),
-    })),
+    chats: rows.map((r) => {
+      const phone = !r.is_group && r.jid.endsWith('@s.whatsapp.net') ? r.jid.split('@')[0].split(':')[0] : null;
+      const { gnumbers, dnumbers, contact_name, push_name, ...rest } = r;
+      return {
+        ...rest, phone, numbers: (r.is_group ? gnumbers : dnumbers) || [],
+        subject: r.is_group ? r.subject : (contact_name || push_name || (phone ? '+' + phone : 'Unknown contact')),
+        status: r.status || 'open', labels: r.labels || [], unread: Number(r.unread), last_uid: r.last_uid == null ? null : Number(r.last_uid),
+      };
+    }),
   };
 }));
 
@@ -221,6 +238,69 @@ router.post('/delete', requirePortal, wrap(async (req) => {
   if (!m.from_me) throw new HttpError(400, 'you can only delete messages we sent');
   if (req.me.role !== 'admin' && m.sent_by_name !== req.me.name) throw new HttpError(403, 'you can only delete your own messages');
   return send(req, 'deleteMessage', [Number(m.uid)], { to: undefined, replyUid: Number(m.uid) });
+}));
+
+// ---- starting chats and managing groups ---------------------------------------------------------------------------
+const digits = (x) => String(x ?? '').replace(/\D/g, '');
+
+/** Is this number on WhatsApp? Used before opening a new 1:1 chat. */
+router.post('/lookup', requirePortal, wrap(async (req) => {
+  const phone = digits(req.body?.phone);
+  if (phone.length < 8 || phone.length > 15) throw new HttpError(400, 'enter the phone number with country code, for example 919800000001');
+  const id = await manager.resolve(req.body?.number ?? undefined);
+  const out = await manager.call(id, 'lookupNumbers', [phone]);
+  const r = out.results?.[0];
+  if (!r?.on_whatsapp) throw new HttpError(404, '+' + phone + ' is not on WhatsApp');
+  const { rows } = await q('SELECT 1 FROM messages WHERE chat_jid = $1 LIMIT 1', [r.jid]);
+  return { jid: r.jid, phone, number: id, existing: !!rows[0] };
+}));
+
+router.post('/groups', requirePortal, wrap(async (req) => {
+  needWrites();
+  const b = req.body || {};
+  const subject = clean(b.subject, 100);
+  if (!subject) throw new HttpError(400, 'give the group a name');
+  const parts = (Array.isArray(b.participants) ? b.participants : String(b.participants || '').split(/[,;\n]+/)).map(digits).filter(Boolean);
+  if (!parts.length) throw new HttpError(400, 'add at least one phone number (with country code)');
+  const id = await manager.resolve(b.number ?? undefined);
+  const out = await manager.call(id, 'createGroup', { subject, participants: parts });
+  return { ok: true, number: id, ...out };
+}));
+
+router.get('/groups/:jid', requirePortal, wrap(async (req) => {
+  const jid = jidOf(req);
+  const { rows } = await q('SELECT * FROM wa_groups WHERE jid = $1 ORDER BY updated_at DESC LIMIT 1', [jid]);
+  if (!rows[0]) throw new HttpError(404, 'group not found');
+  const g = rows[0];
+  const parts = Array.isArray(g.participants) ? g.participants : [];
+  const phones = parts.map((p) => digits(String(p.jid || '').split('@')[0])).filter(Boolean);
+  const { rows: names } = phones.length ? await q(
+    `SELECT DISTINCT ON (sender_phone) sender_phone, sender_name FROM messages
+      WHERE chat_jid = $1 AND sender_phone = ANY($2) AND sender_name IS NOT NULL ORDER BY sender_phone, uid DESC`, [jid, phones]) : { rows: [] };
+  const nm = new Map(names.map((r) => [r.sender_phone, r.sender_name]));
+  return {
+    jid, subject: g.subject, description: g.description, number_id: g.number_id,
+    participants: parts.map((p) => { const ph = digits(String(p.jid || '').split('@')[0]); return { jid: p.jid, phone: ph || null, admin: p.admin || null, name: nm.get(ph) || null }; }),
+  };
+}));
+
+router.put('/groups/:jid/subject', requirePortal, wrap(async (req) => {
+  needWrites();
+  const jid = jidOf(req);
+  const id = await pickNumber(req, { jid });
+  await manager.call(id, 'setSubject', jid, req.body?.subject);
+  return { ok: true };
+}));
+
+router.post('/groups/:jid/participants', requirePortal, wrap(async (req) => {
+  needWrites();
+  const jid = jidOf(req), b = req.body || {};
+  if (!['add', 'remove', 'promote', 'demote'].includes(b.action)) throw new HttpError(400, 'action must be add, remove, promote or demote');
+  const parts = (Array.isArray(b.participants) ? b.participants : String(b.participants || '').split(/[,;\n]+/)).map((x) => (String(x).includes('@') ? String(x) : digits(x))).filter(Boolean);
+  if (!parts.length) throw new HttpError(400, 'add at least one phone number');
+  const id = await pickNumber(req, { jid });
+  const out = await manager.call(id, 'updateParticipants', jid, { action: b.action, participants: parts });
+  return { ok: true, ...out };
 }));
 
 // ---- response times ----------------------------------------------------------------------------------------------

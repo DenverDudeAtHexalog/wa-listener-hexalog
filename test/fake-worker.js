@@ -18,6 +18,8 @@ const sock = {
     messageTimestamp: Math.floor(Date.now() / 1000), message: content.text ? { conversation: content.text } : { conversation: '[' + Object.keys(content)[0] + ']' },
   })),
   groupCreate: rec('groupCreate', (subject, jids) => ({ id: `1203630000000000${id}0@g.us`, subject, participants: jids.map((j) => ({ id: j })) })),
+  groupUpdateSubject: rec('groupUpdateSubject'),
+  groupParticipantsUpdate: rec('groupParticipantsUpdate', (jid, jids, action) => jids.map((j) => ({ jid: j, status: '200' }))),
   groupMetadata: rec('groupMetadata', (jid) => ({ id: jid, subject: 'Acme CX', participants: [] })),
 };
 

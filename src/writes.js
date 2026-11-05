@@ -28,6 +28,12 @@ export async function pickNumber(req, { uid, jid }) {
     if (connected.length === 1) return connected[0];
     if (rows.length === 1) return rows[0].number_id;
   }
+  if (typeof jid === 'string' && jid && !jid.endsWith('@g.us')) { // a 1:1 chat: the number that already talks to this person
+    const { rows } = await q('SELECT DISTINCT number_id FROM messages WHERE chat_jid=$1', [jid]);
+    const connected = rows.map((r) => r.number_id).filter((id) => manager.get(id).linked);
+    if (connected.length === 1) return connected[0];
+    if (rows.length === 1) return rows[0].number_id;
+  }
   return manager.resolve(undefined);
 }
 

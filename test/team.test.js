@@ -25,7 +25,7 @@ const { initChat } = await import('../src/chat.js');
 const manager = await import('../src/manager.js');
 
 await migrate();
-await q('TRUNCATE messages, reactions, wa_groups, webhooks, webhook_deliveries, actions_log, connection_log, numbers, users, chat_state, chat_notes, chat_reads, quick_replies RESTART IDENTITY CASCADE');
+await q('TRUNCATE chat_known, contacts, messages, reactions, wa_groups, webhooks, webhook_deliveries, actions_log, connection_log, numbers, users, chat_state, chat_notes, chat_reads, quick_replies RESTART IDENTITY CASCADE');
 await manager.loadNumbers();
 await loadPeople();
 initChat();
@@ -188,6 +188,51 @@ assert.equal((await login('asha', 'asha-pass-123')).status, 401);
 assert.equal((await call('PUT', `/portal/users/${ashaId}`, { active: true, role: 'admin', name: 'Asha K' }, owner.h)).body.user.role, 'admin');
 assert.equal((await call('GET', '/portal/me', undefined, asha.h)).body.user.role, 'admin', 'role change applies to the existing session');
 assert.equal((await call('GET', '/portal/chat/users', undefined, ravi.h)).body.users.length, 2);
+
+// ---- 1:1 chats, starting a chat, creating and managing groups --------------------------------------------------------
+const DM = '919811122233@s.whatsapp.net';
+await feed(1, { key: { remoteJid: DM, id: 'DMA', fromMe: false }, pushName: 'Priya Shah', messageTimestamp: now(), message: { conversation: 'hi, a question about my booking' } });
+chats = (await call('GET', '/portal/chat/chats', undefined, ravi.h)).body.chats;
+const dmChat = chats.find((c) => c.jid === DM);
+assert.ok(dmChat, '1:1 chats show up in the chat list');
+assert.equal(dmChat.is_group, false); assert.equal(dmChat.subject, 'Priya Shah'); assert.equal(dmChat.phone, '919811122233');
+assert.deepEqual(dmChat.numbers, [1]); assert.equal(dmChat.unread, 1); assert.ok(dmChat.waiting_since);
+assert.equal(chats.find((c) => c.jid === SHARED).is_group, true);
+assert.equal((await call('GET', '/portal/chat/chats?number=2', undefined, ravi.h)).body.chats.some((c) => c.jid === DM), false, 'number filter applies to 1:1 chats');
+r = await call('GET', `/api/groups/${encodeURIComponent(DM)}/messages?limit=10`, undefined, ravi.h);
+assert.equal(r.body.messages.length, 1); assert.equal(r.body.messages[0].text, 'hi, a question about my booking');
+r = await call('POST', '/portal/chat/send', { to: DM, text: 'Hello Priya, looking into it' }, ravi.h);
+assert.equal(r.status, 200, 'reply goes out through the number that already talks to this person');
+assert.equal(r.body.number, 1);
+chats = (await call('GET', '/portal/chat/chats', undefined, ravi.h)).body.chats;
+assert.equal(chats.find((c) => c.jid === DM).assignee_name, 'Ravi', 'answering a 1:1 chat claims it');
+
+r = await call('POST', '/portal/chat/lookup', { phone: '+91 98765 43210' }, ravi.h);
+assert.equal(r.status, 400, 'two numbers connected: has to say which one');
+r = await call('POST', '/portal/chat/lookup', { phone: '+91 98765 43210', number: 2 }, ravi.h);
+assert.equal(r.status, 200); assert.equal(r.body.jid, '919876543210@s.whatsapp.net'); assert.equal(r.body.existing, false);
+assert.equal((await call('POST', '/portal/chat/lookup', { phone: '12' }, ravi.h)).status, 400);
+r = await call('POST', '/portal/chat/send', { to: '919876543210@s.whatsapp.net', text: 'Hi, this is Hexalog', number: 2 }, ravi.h);
+assert.equal(r.status, 200, 'first message to someone new');
+chats = (await call('GET', '/portal/chat/chats', undefined, ravi.h)).body.chats;
+assert.ok(chats.find((c) => c.jid === '919876543210@s.whatsapp.net'), 'the new chat is listed');
+
+assert.equal((await call('POST', '/portal/chat/groups', { subject: '', participants: ['919800000001'] }, ravi.h)).status, 400);
+assert.equal((await call('POST', '/portal/chat/groups', { subject: 'Gamma CX', participants: [] }, ravi.h)).status, 400);
+r = await call('POST', '/portal/chat/groups', { subject: 'Gamma CX', participants: '+91 98000 00001, 919800000002', number: 2 }, ravi.h);
+assert.equal(r.status, 200); const NEWG = r.body.jid; assert.ok(NEWG.endsWith('@g.us')); assert.equal(r.body.number, 2);
+chats = (await call('GET', '/portal/chat/chats', undefined, ravi.h)).body.chats;
+const gamma = chats.find((c) => c.jid === NEWG);
+assert.ok(gamma && gamma.is_group && gamma.subject === 'Gamma CX', 'new group shows up even before anyone writes in it');
+r = await call('GET', `/portal/chat/groups/${encodeURIComponent(NEWG)}`, undefined, ravi.h);
+assert.equal(r.body.subject, 'Gamma CX'); assert.equal(r.body.participants.length, 2); assert.equal(r.body.participants[0].phone, '919800000001');
+assert.equal((await call('PUT', `/portal/chat/groups/${encodeURIComponent(NEWG)}/subject`, { subject: 'Gamma Support' }, ravi.h)).status, 200);
+r = await call('POST', `/portal/chat/groups/${encodeURIComponent(NEWG)}/participants`, { action: 'add', participants: ['919800000003'] }, ravi.h);
+assert.equal(r.status, 200); assert.equal(r.body.results[0].ok, true);
+assert.equal((await call('POST', `/portal/chat/groups/${encodeURIComponent(NEWG)}/participants`, { action: 'nuke', participants: ['919800000003'] }, ravi.h)).status, 400);
+const sockCalls = await manager._request(2, { t: 'calls' });
+assert.ok(sockCalls.some((c) => c[0] === 'groupUpdateSubject' && c[2] === 'Gamma Support'));
+assert.ok(sockCalls.some((c) => c[0] === 'groupParticipantsUpdate' && c[3] === 'add'));
 
 await manager.shutdown();
 server.close();
